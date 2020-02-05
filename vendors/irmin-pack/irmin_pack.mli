@@ -85,3 +85,6 @@ module Atomic_write (K : Irmin.Type.S) (V : Irmin.Hash.S) : sig
 
   val v : ?fresh:bool -> ?readonly:bool -> string -> t Lwt.t
 end
+
+module Stats = Stats
+

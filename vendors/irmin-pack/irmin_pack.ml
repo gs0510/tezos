@@ -508,3 +508,5 @@ end
 
 module KV (Config : CONFIG) (C : Irmin.Contents.S) =
   Make (Config) (Metadata) (C) (Path) (Irmin.Branch.String) (Hash)
+
+module Stats = Stats
