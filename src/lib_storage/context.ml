@@ -28,6 +28,51 @@
 module Path = Irmin.Path.String_list
 module Metadata = Irmin.Metadata.None
 
+
+let index_src =
+  let open Metrics in
+  let open Index.Stats in
+  let tags = Tags.[] in
+  let data t =
+    Data.v
+      [
+        int "bytes_read" t.bytes_read;
+        int "bytes_written" t.bytes_written;
+        int "merge" t.nb_merge;
+        int "replace" t.nb_replace;
+      ]
+  in
+  Src.v "bench_index" ~tags ~data
+
+let pack_src =
+  let open Metrics in
+  let open Irmin_pack.Stats in
+  let tags = Tags.[] in
+  let data t =
+    Data.v
+      [
+        int "find" t.finds;
+        int "appended_hashes" t.appended_hashes;
+        int "appended_offsets" t.appended_offsets;
+      ]
+  in
+  Src.v "bench_irmin" ~tags ~data
+
+let no_tags x = x
+
+let with_metrics = ref true
+
+  let add_metrics () =
+    if !with_metrics then
+      let index_stats = Index.Stats.get () in
+      let pack_stats = Irmin_pack.Stats.get () in
+      Metrics_lwt.add index_src no_tags (fun m -> Lwt.return (m index_stats))
+      >>= fun () ->
+      Metrics_lwt.add pack_src no_tags (fun m -> Lwt.return (m pack_stats))
+    else Lwt.return_unit
+
+let reset_stats () = Index.Stats.reset_stats (); Irmin_pack.Stats.reset_stats ();
+
 exception TODO of string
 
 let todo fmt = Fmt.kstrf (fun s -> raise (TODO s)) fmt
@@ -54,6 +99,10 @@ let reporter () =
 let index_log_size = ref None
 
 let () =
+  if !with_metrics then (
+    Metrics.enable_all ();
+    Metrics_gnuplot.set_reporter ());
+    (*Metrics_unix.monitor_gc 0.1*)
   let verbose () =
     Logs.set_level (Some Logs.Debug) ;
     Logs.set_reporter (reporter ())
@@ -283,7 +332,8 @@ let raw_commit ~time ?(message = "") context =
   unshallow context
   >>= fun () ->
   Store.Commit.v context.index.repo ~info ~parents context.tree
-  >|= fun h ->
+  >>= fun h ->
+  add_metrics () >|= fun () ->
   Store.Tree.clear context.tree ;
   h
 
@@ -398,6 +448,7 @@ let fork_test_chain v ~protocol ~expiration =
 (*-- Initialisation ----------------------------------------------------------*)
 
 let init ?patch_context ?mapsize:_ ?readonly root =
+  reset_stats ();
   Store.Repo.v
     (Irmin_pack.config ?readonly ?index_log_size:!index_log_size root)
   >>= fun repo ->
@@ -686,6 +737,7 @@ module Dumpable_context = struct
     let parents = List.map Hash.of_context_hash parents in
     Store.Commit.v ctxt.index.repo ~info ~parents ctxt.tree
     >>= fun c ->
+    add_metrics () >>= fun () ->
     let h = Store.Commit.hash c in
     if
       Context_hash.equal bh.Block_header.shell.context (Hash.to_context_hash h)
@@ -845,7 +897,8 @@ let validate_context_hash_consistency_and_commit ~data_hash
     Store.Tree.add_tree ctxt.tree current_data_key data_t
     >>= fun new_tree ->
     Store.Commit.v ctxt.index.repo ~info ~parents new_tree
-    >|= fun commit ->
+    >>= fun commit ->
+    add_metrics () >|= fun () ->
     let ctxt_h = Hash.to_context_hash (Store.Commit.hash commit) in
     Context_hash.equal ctxt_h expected_context_hash
   else Lwt.return_false

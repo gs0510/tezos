@@ -7,6 +7,9 @@
             digestif.c
             irmin
             irmin-pack
+            metrics
+            metrics-unix
+            metrics-lwt
             tezos-stdlib-unix)
  (flags (:standard -w -9+27-30-32-40@8
                    -safe-string
