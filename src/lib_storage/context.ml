@@ -321,6 +321,8 @@ let unshallow context =
               Store.Tree.get_tree context.tree [s]
               >>= fun tree ->
               Store.save_tree ~clear:true context.index.repo x y tree
+              >>= fun _ ->
+              add_metrics ()
               >|= fun _ -> ())
         childs)
 
@@ -661,7 +663,8 @@ module Dumpable_context = struct
         Store.repo * [`Read | `Write] P.Contents.t * [`Read | `Write] P.Node.t
 
   let batch index f =
-    P.Repo.batch index.repo (fun x y _ -> f (Batch (index.repo, x, y)))
+    P.Repo.batch index.repo (fun x y _ -> f (Batch (index.repo, x, y))) >>= fun res ->
+    add_metrics () >|= fun () -> res
 
   let hash_import ty mb =
     Context_hash.of_bytes mb
@@ -780,7 +783,9 @@ module Dumpable_context = struct
 
   let add_string (Batch (_, t, _)) string =
     (* Save the contents in the store *)
-    Store.save_contents t string >|= fun _ -> Store.Tree.of_contents string
+    Store.save_contents t string >>= fun _ ->
+    add_metrics () >|= fun () ->
+    Store.Tree.of_contents string
 
   let add_dir batch l =
     let rec fold_list sub_tree = function
