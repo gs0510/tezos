@@ -23,25 +23,7 @@ exception RO_not_allowed
 
 let current_version = "00000001"
 
-type stats = {
-  mutable bytes_read : int;
-  mutable nb_reads : int;
-  mutable bytes_written : int;
-  mutable nb_writes : int;
-}
-
-let fresh_stats () =
-  { bytes_read = 0; nb_reads = 0; bytes_written = 0; nb_writes = 0 }
-
-let stats = fresh_stats ()
-
-let reset_stats () =
-  stats.bytes_read <- 0;
-  stats.nb_reads <- 0;
-  stats.bytes_written <- 0;
-  stats.nb_writes <- 0
-
-let get_stats () = stats
+module Stats = Index.Stats
 
 module IO : Index.IO = struct
   let ( ++ ) = Int64.add
@@ -68,8 +50,6 @@ module IO : Index.IO = struct
     in
     get_uint64 buf 0
 
-  exception Bad_Read
-
   module Raw = struct
     type t = { fd : Unix.file_descr; mutable cursor : int64 }
 
@@ -81,12 +61,13 @@ module IO : Index.IO = struct
     external pwrite : Unix.file_descr -> int64 -> bytes -> int -> int -> int
       = "caml_pwrite"
 
+    external unix_fsync : Unix.file_descr -> unit = "unix_fsync"
+
     let really_write fd off buf =
       let rec aux fd_off buf_off len =
         let w = pwrite fd fd_off buf buf_off len in
         if w = 0 || w = len then ()
-        else
-          (aux [@tailcall]) (fd_off ++ Int64.of_int w) (buf_off + w) (len - w)
+        else (aux [@tailcall]) (fd_off ++ Int64.of_int w) (buf_off + w) (len - w)
       in
       (aux [@tailcall]) off 0 (Bytes.length buf)
 
@@ -95,26 +76,22 @@ module IO : Index.IO = struct
         let r = pread fd fd_off buf buf_off len in
         if r = 0 then buf_off (* end of file *)
         else if r = len then buf_off + r
-        else
-          (aux [@tailcall]) (fd_off ++ Int64.of_int r) (buf_off + r) (len - r)
+        else (aux [@tailcall]) (fd_off ++ Int64.of_int r) (buf_off + r) (len - r)
       in
       (aux [@tailcall]) off 0 len
+
+    let fsync t = unix_fsync t.fd
 
     let unsafe_write t ~off buf =
       let buf = Bytes.unsafe_of_string buf in
       really_write t.fd off buf;
       t.cursor <- off ++ Int64.of_int (Bytes.length buf);
-      stats.bytes_written <- stats.bytes_written + Bytes.length buf;
-      stats.nb_writes <- succ stats.nb_writes
+      Stats.add_write (Bytes.length buf)
 
     let unsafe_read t ~off ~len buf =
-      let n =
-        try really_read t.fd off len buf
-        with Unix.Unix_error (Unix.EBADF, "read", "") -> raise Bad_Read
-      in
+      let n = really_read t.fd off len buf in
       t.cursor <- off ++ Int64.of_int n;
-      stats.bytes_read <- stats.bytes_read + n;
-      stats.nb_reads <- succ stats.nb_reads;
+      Stats.add_read n;
       n
 
     module Offset = struct
@@ -188,7 +165,7 @@ module IO : Index.IO = struct
     buf : Buffer.t;
   }
 
-  let sync t =
+  let sync ?(with_fsync = false) t =
     if t.readonly then raise RO_not_allowed;
     let buf = Buffer.contents t.buf in
     let offset = t.offset in
@@ -197,14 +174,14 @@ module IO : Index.IO = struct
     else (
       Raw.unsafe_write t.raw ~off:t.flushed buf;
       Raw.Offset.set t.raw offset;
-      assert (
-        t.flushed ++ Int64.of_int (String.length buf) = t.header ++ offset );
-      t.flushed <- offset ++ t.header )
+      assert (t.flushed ++ Int64.of_int (String.length buf) = t.header ++ offset);
+      t.flushed <- offset ++ t.header );
+    if with_fsync then Raw.fsync t.raw
 
   let name t = t.file
 
   let rename ~src ~dst =
-    sync src;
+    sync ~with_fsync:true src;
     Unix.close dst.raw.fd;
     Unix.rename src.file dst.file;
     Buffer.clear dst.buf;
@@ -400,11 +377,21 @@ module IO : Index.IO = struct
         raise e
   end
 
-  let async f = ignore (Thread.create f ())
+  type async = Thread.t option
+
+  let async f = Some (Thread.create f ())
+
+  let yield = Thread.yield
+
+  let return () = None
+
+  let await t = match t with None -> () | Some t -> Thread.join t
 end
 
 module Make (K : Index.Key) (V : Index.Value) = Index.Make (K) (V) (IO)
 
 module Private = struct
   module IO = IO
+  module Make (K : Index.Key) (V : Index.Value) =
+    Index.Private.Make (K) (V) (IO)
 end
