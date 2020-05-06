@@ -129,7 +129,8 @@ let set_head chain_state block =
       locked_set_head chain_store data block live_blocks live_operations
       >>= fun new_chain_data ->
       Lwt.return (Some new_chain_data, data.current_head))
-  >>= fun chain_state -> return chain_state
+  >>= fun chain_block ->
+  State.Chain.reopen_context chain_state >>= fun () -> return chain_block
 
 let test_and_set_head chain_state ~old block =
   State.Block.max_operations_ttl block

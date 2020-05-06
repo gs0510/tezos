@@ -27,6 +27,8 @@
 
 (** Tezos - Versioned (key x value) store (over Irmin) *)
 
+let root_ref = ref ""
+
 module Path = Irmin.Path.String_list
 module Metadata = Irmin.Metadata.None
 
@@ -225,13 +227,22 @@ module P = Store.Private
 
 type index = {
   path : string;
-  repo : Store.Repo.t;
+  mutable repo : Store.Repo.t;
   patch_context : (context -> context tzresult Lwt.t) option;
 }
 
 and context = {index : index; parents : Store.Commit.t list; tree : Store.tree}
 
 type t = context
+
+let reopen_context index =
+  Store.Repo.close index.repo
+  >>= fun () ->
+  Store.Repo.v
+    (Irmin_pack.config ~readonly:true ?index_log_size:!index_log_size !root_ref)
+  >>= fun repo ->
+  index.repo <- repo ;
+  Lwt.return_unit
 
 (*-- Version Access and Update -----------------------------------------------*)
 
@@ -417,11 +428,11 @@ let fork_test_chain v ~protocol ~expiration =
 (*-- Initialisation ----------------------------------------------------------*)
 
 let init ?patch_context ?mapsize:_ ?readonly root =
+  root_ref := root ;
   Store.Repo.v
     (Irmin_pack.config ?readonly ?index_log_size:!index_log_size root)
   >>= fun repo ->
   let v = {path = root; repo; patch_context} in
-  Gc.finalise (fun v -> Lwt.async (fun () -> Store.Repo.close v.repo)) v ;
   Lwt.return v
 
 let get_branch chain_id = Format.asprintf "%a" Chain_id.pp chain_id
@@ -897,6 +908,8 @@ let dump_contexts idx datas ~filename =
           in
           fail (Cannot_create_file msg))
   >>=? fun fd -> dump_contexts_fd idx datas ~fd
+
+let close index = Store.Repo.close index.repo
 
 let restore_contexts idx ~filename k_store_pruned_block pipeline_validation =
   let file_init () =

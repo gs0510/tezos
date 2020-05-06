@@ -221,3 +221,7 @@ val validate_context_hash_consistency_and_commit :
   bool Lwt.t
 
 val upgrade_0_0_3 : context_dir:string -> unit tzresult Lwt.t
+
+val close : index -> unit Lwt.t
+
+val reopen_context : index -> unit Lwt.t

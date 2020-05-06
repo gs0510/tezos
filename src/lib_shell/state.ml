@@ -734,6 +734,11 @@ module Chain = struct
 
   let id {chain_id; _} = chain_id
 
+  let reopen_context (chain_state : chain_state) =
+    Format.printf "reopen@." ;
+    Shared.use chain_state.context_index (fun index ->
+        Context.reopen_context index)
+
   let genesis {genesis; _} = genesis
 
   let faked_genesis_hash {faked_genesis_hash; _} = faked_genesis_hash
