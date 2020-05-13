@@ -78,6 +78,8 @@ module Chain : sig
   (** Various accessors. *)
   val id : chain_state -> Chain_id.t
 
+  val ro_sync : chain_state -> unit Lwt.t
+
   val genesis : chain_state -> Genesis.t
 
   val global_state : chain_state -> global_state

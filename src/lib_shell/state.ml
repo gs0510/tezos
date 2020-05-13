@@ -734,6 +734,11 @@ module Chain = struct
 
   let id {chain_id; _} = chain_id
 
+  let ro_sync (chain_state :chain_state) =
+    Format.printf "ro_sync@." ;
+    Shared.use chain_state.context_index (fun index ->
+        Context.ro_syncs index; Lwt.return_unit)
+
   let genesis {genesis; _} = genesis
 
   let faked_genesis_hash {faked_genesis_hash; _} = faked_genesis_hash

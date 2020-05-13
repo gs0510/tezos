@@ -30,7 +30,7 @@
 module Path = Irmin.Path.String_list
 module Metadata = Irmin.Metadata.None
 
-let reporter () =
+let _reporter () =
   let report src level ~over k msgf =
     let k _ = over () ; k () in
     let with_stamp h _tags k fmt =
@@ -49,13 +49,43 @@ let reporter () =
   in
   {Logs.report}
 
+
+let file_reporter () =
+  let buf_fmt ~like =
+    let b = Buffer.create 512 in
+    ( Fmt.with_buffer ~like b,
+      fun () ->
+        let m = Buffer.contents b in
+        Buffer.reset b;
+        m )
+  in
+  let fd =
+    Unix.openfile "my_file.log" Unix.[ O_CREAT; O_WRONLY; O_APPEND ] 0o644
+  in
+  let report src level ~over k msgf =
+    let app, app_flush = buf_fmt ~like:Fmt.stdout in
+    let dst, dst_flush = buf_fmt ~like:Fmt.stderr in
+    let reporter = Logs_fmt.reporter ~app ~dst () in
+    let k () =
+      let buf = Bytes.unsafe_of_string (app_flush ()) in
+      let _ = Unix.write fd buf 0 (Bytes.length buf) in
+      let buf = Bytes.unsafe_of_string (dst_flush ()) in
+      let _ = Unix.write fd buf 0 (Bytes.length buf) in
+      over ();
+      k ()
+    in
+    reporter.Logs.report src level ~over:(fun () -> ()) k msgf
+  in
+  { Logs.report }
+
 let index_log_size = ref None
 
 let () =
   let verbose () =
-    Logs.set_level (Some Logs.Debug) ;
-    Logs.set_reporter (reporter ())
+    Logs.set_level (Some Logs.App) ;
+    Logs.set_reporter (file_reporter ())
   in
+  (* verbose (); *)
   let index_log_size n = index_log_size := Some (int_of_string n) in
   match Unix.getenv "TEZOS_STORAGE" with
   | exception Not_found ->
@@ -227,6 +257,7 @@ type index = {
   path : string;
   repo : Store.Repo.t;
   patch_context : (context -> context tzresult Lwt.t) option;
+  readonly : bool;
 }
 
 and context = {index : index; parents : Store.Commit.t list; tree : Store.tree}
@@ -255,11 +286,15 @@ let restore_integrity ?ppf index =
            "unable to fix the corrupted context: %d bad entries detected"
            n)
 
+let ro_syncs index = Store.ro_sync index.repo
+
 let exists index key =
+  if index.readonly then ro_syncs index ;
   Store.Commit.of_hash index.repo (Hash.of_context_hash key)
   >|= function None -> false | Some _ -> true
 
 let checkout index key =
+  if index.readonly then ro_syncs index;
   Store.Commit.of_hash index.repo (Hash.of_context_hash key)
   >>= function
   | None ->
@@ -305,8 +340,12 @@ let raw_commit ~time ?(message = "") context =
   >>= fun h ->
   (if (!counter = 50) then (
       counter := 0;
+      let tm = Unix.localtime (Unix.gettimeofday ()) in
+      Logs.app (fun l -> l "[%d:%d:%d] before freeze" tm.tm_hour tm.tm_min tm.tm_sec);
       Store.freeze ~max:[ h ] context.index.repo >|= fun () ->
-      Logs.app (fun l -> l "freeze ")
+      let tm = Unix.localtime (Unix.gettimeofday ()) in
+      Logs.app (fun l -> l "[%d:%d:%d] after freeze" tm.tm_hour tm.tm_min tm.tm_sec);
+
   )
   else Lwt.return_unit) >|= fun () ->
   Store.Tree.clear context.tree ;
@@ -426,15 +465,13 @@ let fork_test_chain v ~protocol ~expiration =
 
 let config ?readonly ?index_log_size root =
   let conf = Irmin_pack.config ?readonly ?index_log_size root in
-  Irmin_pack.config_layers ~conf ~keep_max:true ()
+  Irmin_pack.config_layers ~conf ~keep_max:true ~pause_copy:1000 ~pause_add:1  ()
 
-
-let init ?patch_context ?mapsize:_ ?readonly root =
+let init ?patch_context ?mapsize:_ ?(readonly=false) root =
   Store.Repo.v
-    (config ?readonly ?index_log_size:!index_log_size root)
+    (config ~readonly ?index_log_size:!index_log_size root)
   >>= fun repo ->
-  let v = {path = root; repo; patch_context} in
-  Gc.finalise (fun v -> Lwt.async (fun () -> Store.Repo.close v.repo)) v ;
+  let v = {path = root; repo; patch_context; readonly} in
   Lwt.return v
 
 let get_branch chain_id = Format.asprintf "%a" Chain_id.pp chain_id
