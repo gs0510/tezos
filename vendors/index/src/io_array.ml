@@ -82,12 +82,14 @@ module Make (IO : Io.S) (Elt : ELT) :
   let buf = Bytes.create max_buffer_size
 
   let set_buffer t ~low ~high =
-    let range = Elt.encoded_size * (1 + Int64.to_int (high -- low)) in
-    let low_off = Int64.mul low Elt.encoded_sizeL in
-    let high_off = Int64.mul high Elt.encoded_sizeL in
-    let n = IO.read t.io ~off:low_off ~len:range buf in
-    assert (n = range);
-    t.buffer <- Some { buf; low_off; high_off }
+    if high <= low then ()
+    else
+      let range = Elt.encoded_size * (1 + Int64.to_int (high -- low)) in
+      let low_off = Int64.mul low Elt.encoded_sizeL in
+      let high_off = Int64.mul high Elt.encoded_sizeL in
+      let n = IO.read t.io ~off:low_off ~len:range buf in
+      assert (n = range);
+      t.buffer <- Some { buf; low_off; high_off }
 
   let pre_fetch t ~low ~high =
     let range = Elt.encoded_size * (1 + Int64.to_int (high -- low)) in

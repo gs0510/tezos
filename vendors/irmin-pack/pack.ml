@@ -60,11 +60,15 @@ module type S = sig
 
   val unsafe_append : 'a t -> key -> value -> unit
 
+  val unsafe_add : 'a t -> key -> value -> unit Lwt.t
+
   val unsafe_mem : 'a t -> key -> bool
 
   val unsafe_find : 'a t -> key -> value option
 
   val sync : 'a t -> unit
+
+  val ro_sync : 'a t -> unit
 
   type integrity_error = [ `Wrong_hash | `Absent_value ]
 
@@ -121,8 +125,9 @@ struct
   }
 
   let clear t =
-    IO.clear t.block;
     Index.clear t.index;
+    IO.clear t.block;
+    IO.sync t.block;
     Dict.clear t.dict
 
   let valid t =
@@ -170,8 +175,9 @@ struct
 
     type index = Index.t
 
-    let clear t =
+    let unsafe_clear t =
       clear t.pack;
+      ignore (Lru.clear t.lru);
       Tbl.clear t.staging
 
     (* we need another cache here, as we want to share the LRU and
@@ -198,14 +204,14 @@ struct
       try
         let t = Hashtbl.find roots (root, readonly) in
         if valid t then (
-          if fresh then clear t;
+          if fresh then unsafe_clear t;
           t )
         else (
           Hashtbl.remove roots (root, readonly);
           raise Not_found )
       with Not_found ->
         let t = unsafe_v_no_cache ~fresh ~readonly ~lru_size ~index root in
-        if fresh then clear t;
+        if fresh then unsafe_clear t;
         Hashtbl.add roots (root, readonly) t;
         t
 
@@ -276,8 +282,10 @@ struct
 
     let find t k =
       Lwt_mutex.with_lock t.pack.lock (fun () ->
-          let v = unsafe_find t k in
-          Lwt.return v)
+          try
+            let v = unsafe_find t k in
+            Lwt.return v
+          with exn -> Lwt.fail exn)
 
     let cast t = (t :> [ `Read | `Write ] t)
 
@@ -286,6 +294,10 @@ struct
       IO.sync t.pack.block;
       Index.flush t.pack.index;
       Tbl.clear t.staging
+
+    let ro_sync t =
+      Dict.ro_sync t.pack.dict;
+      Index.ro_sync t.pack.index
 
     type integrity_error = [ `Wrong_hash | `Absent_value ]
 
@@ -351,6 +363,11 @@ struct
     let close t =
       Lwt_mutex.with_lock t.pack.lock (fun () ->
           unsafe_close t;
+          Lwt.return_unit)
+
+    let clear t =
+      Lwt_mutex.with_lock t.pack.lock (fun () ->
+          unsafe_clear t;
           Lwt.return_unit)
   end
 end

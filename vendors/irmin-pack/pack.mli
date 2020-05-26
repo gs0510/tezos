@@ -52,11 +52,15 @@ module type S = sig
 
   val unsafe_append : 'a t -> key -> value -> unit
 
+  val unsafe_add : 'a t -> key -> value -> unit Lwt.t
+
   val unsafe_mem : 'a t -> key -> bool
 
   val unsafe_find : 'a t -> key -> value option
 
   val sync : 'a t -> unit
+
+  val ro_sync : 'a t -> unit
 
   type integrity_error = [ `Wrong_hash | `Absent_value ]
 

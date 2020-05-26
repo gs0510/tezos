@@ -26,6 +26,10 @@ module type S = sig
 
   type index
 
+  module Key : Irmin.Hash.S with type t = key
+
+  module Val : Irmin.Private.Node.S with type t = value and type hash = key
+
   val v :
     ?fresh:bool ->
     ?readonly:bool ->
@@ -36,22 +40,64 @@ module type S = sig
 
   val batch : [ `Read ] t -> ([ `Read | `Write ] t -> 'a Lwt.t) -> 'a Lwt.t
 
-  module Key : Irmin.Hash.S with type t = key
-
-  module Val : Irmin.Private.Node.S with type t = value and type hash = key
-
   type integrity_error = [ `Wrong_hash | `Absent_value ]
 
   val integrity_check :
     offset:int64 -> length:int -> key -> 'a t -> (unit, integrity_error) result
 
   val close : 'a t -> unit Lwt.t
+
+  val ro_sync : 'a t -> unit
 end
 
 module type CONFIG = sig
   val entries : int
 
   val stable_hash : int
+end
+
+module T_Maker
+    (H : Irmin.Hash.S)
+    (Node : Irmin.Private.Node.S with type hash = H.t) : sig
+  type hash = H.t
+
+  type step = Node.step
+
+  type metadata = Node.metadata
+
+  val step_t : step Irmin.Type.ty
+
+  val hash_t : hash Irmin.Type.t
+
+  val metadata_t : metadata Irmin.Type.t
+
+  val default : metadata
+
+  type value = Node.value
+
+  val value_t : value Irmin.Type.t
+
+  val pp_hash : hash Fmt.t
+end = struct
+  type hash = H.t
+
+  type step = Node.step
+
+  type metadata = Node.metadata
+
+  let step_t = Node.step_t
+
+  let hash_t = H.t
+
+  let metadata_t = Node.metadata_t
+
+  let default = Node.default
+
+  type value = Node.value
+
+  let value_t = Node.value_t
+
+  let pp_hash = Irmin.Type.(pp hash_t)
 end
 
 module Make
@@ -69,27 +115,7 @@ struct
     let hash = H.hash
   end
 
-  module T = struct
-    type hash = H.t
-
-    type step = Node.step
-
-    type metadata = Node.metadata
-
-    let step_t = Node.step_t
-
-    let hash_t = H.t
-
-    let metadata_t = Node.metadata_t
-
-    let default = Node.default
-
-    type value = Node.value
-
-    let value_t = Node.value_t
-
-    let pp_hash = Irmin.Type.(pp hash_t)
-  end
+  module T = T_Maker (H) (Node)
 
   module Inode = struct
     module StepMap = struct
@@ -800,4 +826,8 @@ struct
   let integrity_check = Inode.integrity_check
 
   let close = Inode.close
+
+  let clear = Inode.clear
+
+  let ro_sync = Inode.ro_sync
 end

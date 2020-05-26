@@ -20,4 +20,6 @@ let (`Staged v) =
     "store.dict"
 
 let v ?fresh ?readonly ?(capacity = 100_000) root =
-  v capacity ?fresh ?readonly root
+  let dict = v capacity ?fresh ?readonly root in
+  if readonly = Some true then ro_sync dict;
+  dict

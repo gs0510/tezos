@@ -5,6 +5,9 @@ type t = {
   mutable nb_writes : int;
   mutable nb_merge : int;
   mutable nb_replace : int;
+  mutable replace_times : float list;
+  mutable nb_ro_sync : int;
+  mutable ro_sync_times : float list;
 }
 
 let fresh_stats () =
@@ -15,6 +18,9 @@ let fresh_stats () =
     nb_writes = 0;
     nb_merge = 0;
     nb_replace = 0;
+    replace_times = [];
+    nb_ro_sync = 0;
+    ro_sync_times = [];
   }
 
 let stats = fresh_stats ()
@@ -25,7 +31,10 @@ let reset_stats () =
   stats.bytes_written <- 0;
   stats.nb_writes <- 0;
   stats.nb_merge <- 0;
-  stats.nb_replace <- 0
+  stats.nb_replace <- 0;
+  stats.replace_times <- [];
+  stats.nb_ro_sync <- 0;
+  stats.ro_sync_times <- []
 
 let get () = stats
 
@@ -39,6 +48,10 @@ let incr_nb_writes () = stats.nb_writes <- succ stats.nb_writes
 
 let incr_nb_merge () = stats.nb_merge <- succ stats.nb_merge
 
+let incr_nb_replace () = stats.nb_replace <- succ stats.nb_replace
+
+let incr_nb_ro_sync () = stats.nb_ro_sync <- succ stats.nb_ro_sync
+
 let add_read n =
   incr_bytes_read n;
   incr_nb_reads ()
@@ -46,3 +59,28 @@ let add_read n =
 let add_write n =
   incr_bytes_written n;
   incr_nb_writes ()
+
+let replace_timer = ref (Mtime_clock.counter ())
+
+let nb_replace = ref 0
+
+let start_replace () =
+  if !nb_replace = 0 then replace_timer := Mtime_clock.counter ()
+
+let end_replace ~sampling_interval =
+  nb_replace := !nb_replace + 1;
+  if !nb_replace = sampling_interval then (
+    let span = Mtime_clock.count !replace_timer in
+    let average = Mtime.Span.to_us span /. float_of_int !nb_replace in
+    stats.replace_times <- average :: stats.replace_times;
+    replace_timer := Mtime_clock.counter ();
+    nb_replace := 0 )
+
+let ro_sync_timer = ref (Mtime_clock.counter ())
+
+let start_ro_sync () = ro_sync_timer := Mtime_clock.counter ()
+
+let end_ro_sync () =
+  let span = Mtime_clock.count !ro_sync_timer in
+  let time = Mtime.Span.to_us span in
+  stats.ro_sync_times <- time :: stats.ro_sync_times

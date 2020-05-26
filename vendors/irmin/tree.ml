@@ -206,9 +206,9 @@ module Make (P : S.PRIVATE) = struct
       in
       { v; info }
 
-    let export ?clear:c repo t k =
+    let export ?clear:(c = true) repo t k =
       let hash = t.info.hash in
-      if c = Some true then clear t;
+      if c then clear t;
       match (t.v, hash) with
       | Hash (_, k), _ -> t.v <- Hash (repo, k)
       | Value _, None -> t.v <- Hash (repo, k)
@@ -415,9 +415,9 @@ module Make (P : S.PRIVATE) = struct
       clear ~max_depth 0 n
 
     (* export t to the given repo and clear the cache *)
-    let export ?clear:c repo t k =
+    let export ?clear:(c = true) repo t k =
       let hash = t.info.hash in
-      if c = Some true then clear t;
+      if c then clear t;
       match t.v with
       | Hash (_, k) -> t.v <- Hash (repo, k)
       | Value (_, v, None) when P.Node.Val.is_empty v -> ()
@@ -674,20 +674,22 @@ module Make (P : S.PRIVATE) = struct
             | Some c -> Some (`Contents (c, m)) )
       in
       let of_value repo v =
-        match P.Node.Val.find v step with
-        | None -> Lwt.return_none
-        | Some (`Contents (c, m)) -> (
-            let c = Contents.of_hash repo c in
-            let (v : elt) = `Contents (c, m) in
-            add_to_findv_cache t step v;
-            Contents.to_value c >|= function
-            | None -> None
-            | Some c -> Some (`Contents (c, m)) )
-        | Some (`Node n) ->
-            let n = of_hash repo n in
-            let v = `Node n in
-            add_to_findv_cache t step v;
-            Lwt.return_some v
+        try
+          match P.Node.Val.find v step with
+          | None -> Lwt.return_none
+          | Some (`Contents (c, m)) -> (
+              let c = Contents.of_hash repo c in
+              let (v : elt) = `Contents (c, m) in
+              add_to_findv_cache t step v;
+              Contents.to_value c >|= function
+              | None -> None
+              | Some c -> Some (`Contents (c, m)) )
+          | Some (`Node n) ->
+              let n = of_hash repo n in
+              let v = `Node n in
+              add_to_findv_cache t step v;
+              Lwt.return_some v
+        with exn -> Lwt.fail exn
       in
       let of_t () =
         match t.v with
@@ -904,6 +906,13 @@ module Make (P : S.PRIVATE) = struct
 
   let of_contents ?(metadata = Metadata.default) c = `Contents (c, metadata)
 
+  let v = function `Contents c -> `Contents c | `Node n -> `Node n
+
+  let destruct : tree -> [> `Node of node | `Contents of contents * metadata ] =
+    function
+    | `Node n -> `Node n
+    | `Contents c -> `Contents c
+
   let clear ?depth = function
     | `Node n -> Node.clear ?depth n
     | `Contents _ -> ()
@@ -973,8 +982,8 @@ module Make (P : S.PRIVATE) = struct
     let depth = max n_depth s.depth in
     { s with depth }
 
-  let set_width children s =
-    let width = max s.width (List.length children) in
+  let set_width childs s =
+    let width = max s.width (List.length childs) in
     { s with width }
 
   let err_not_found n k =
@@ -1260,7 +1269,7 @@ module Make (P : S.PRIVATE) = struct
     let rec aux acc = function
       | [] -> Lwt.return acc
       | (path, h) :: todo ->
-          Node.listv h >>= fun children ->
+          Node.listv h >>= fun childs ->
           let acc, todo =
             List.fold_left
               (fun (acc, todo) (k, v) ->
@@ -1268,7 +1277,7 @@ module Make (P : S.PRIVATE) = struct
                 match v with
                 | `Node v -> (acc, (path, v) :: todo)
                 | `Contents c -> ((path, c) :: acc, todo))
-              (acc, todo) children
+              (acc, todo) childs
           in
           (aux [@tailcall]) acc todo
     in
@@ -1364,10 +1373,20 @@ module Make (P : S.PRIVATE) = struct
   type concrete =
     [ `Tree of (step * concrete) list | `Contents of contents * metadata ]
 
+  let concrete_t : concrete Type.t =
+    let open Type in
+    mu (fun concrete_t ->
+        variant "concrete" (fun tree contents ->
+          function `Tree t -> tree t | `Contents c -> contents c)
+        |~ case1 "tree" (list (pair Path.step_t concrete_t)) (fun t -> `Tree t)
+        |~ case1 "contents" (pair P.Contents.Val.t Metadata.t) (fun c ->
+               `Contents c)
+        |> sealv)
+
   let of_concrete c =
     let rec concrete k = function
       | `Contents _ as v -> k v
-      | `Tree children -> tree StepMap.empty (fun n -> k (`Node n)) children
+      | `Tree childs -> tree StepMap.empty (fun n -> k (`Node n)) childs
     and contents k (c, m) = k (`Contents (Contents.of_value c, m))
     and tree map k = function
       | [] -> k (Node.of_map map)
@@ -1396,17 +1415,17 @@ module Make (P : S.PRIVATE) = struct
       Contents.to_value c >>= function
       | None -> k None
       | Some c -> k @@ Some (`Contents (c, m))
-    and node children k = function
-      | [] -> k children
+    and node childs k = function
+      | [] -> k childs
       | (s, n) :: t -> (
           match n with
           | `Node _ as n ->
-              (tree [@tailcall]) (fun tree -> node ((s, tree) :: children) k t) n
+              (tree [@tailcall]) (fun tree -> node ((s, tree) :: childs) k t) n
           | `Contents c ->
               (contents [@tailcall])
                 (function
-                  | None -> (node [@tailcall]) children k t
-                  | Some c -> (node [@tailcall]) ((s, c) :: children) k t)
+                  | None -> (node [@tailcall]) childs k t
+                  | Some c -> (node [@tailcall]) ((s, c) :: childs) k t)
                 c )
     in
     tree (fun x -> Lwt.return x) t
@@ -1425,9 +1444,9 @@ module Make (P : S.PRIVATE) = struct
       else `False (fun k s -> set_depth k s |> incr_skips |> Lwt.return)
     in
     let f k _ s = set_depth k s |> incr_leafs |> Lwt.return in
-    let pre k children s =
-      if children = [] then Lwt.return s
-      else set_depth k s |> set_width children |> incr_nodes |> Lwt.return
+    let pre k childs s =
+      if childs = [] then Lwt.return s
+      else set_depth k s |> set_width childs |> incr_nodes |> Lwt.return
     in
     let post _ _ acc = Lwt.return acc in
     fold ~force ~pre ~post f t empty_stats

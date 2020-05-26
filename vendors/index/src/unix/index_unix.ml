@@ -65,6 +65,7 @@ module IO : Index.IO = struct
 
     let really_write fd off buf =
       let rec aux fd_off buf_off len =
+        Thread.yield ();
         let w = pwrite fd fd_off buf buf_off len in
         if w = 0 || w = len then ()
         else (aux [@tailcall]) (fd_off ++ Int64.of_int w) (buf_off + w) (len - w)
@@ -73,6 +74,7 @@ module IO : Index.IO = struct
 
     let really_read fd off len buf =
       let rec aux fd_off buf_off len =
+        Thread.yield ();
         let r = pread fd fd_off buf buf_off len in
         if r = 0 then buf_off (* end of file *)
         else if r = len then buf_off + r

@@ -69,11 +69,19 @@ module Pack (S : Pack.S) = struct
     check_not_closed t;
     S.sync t.t
 
+  let ro_sync t =
+    check_not_closed t;
+    S.ro_sync t.t
+
   type integrity_error = S.integrity_error
 
   let integrity_check ~offset ~length k t =
     check_not_closed t;
     S.integrity_check ~offset ~length k t.t
+
+  let clear t =
+    check_not_closed t;
+    S.clear t.t
 end
 
 module Atomic_write (AW : S.ATOMIC_WRITE_STORE) = struct
@@ -131,4 +139,12 @@ module Atomic_write (AW : S.ATOMIC_WRITE_STORE) = struct
     else (
       t.closed := true;
       AW.close t.t )
+
+  let clear t =
+    check_not_closed t;
+    AW.clear t.t
+
+  let sync t =
+    check_not_closed t;
+    AW.sync t.t
 end

@@ -44,9 +44,11 @@ let nb_fans t = Array.length t.fans
 let fan t h = (h land t.mask) lsr t.shift
 
 let search t h =
-  let fan = fan t h in
-  let low = if fan = 0 then 0L else t.fans.(fan - 1) in
-  (low, t.fans.(fan))
+  if nb_fans t = 0 then (0L, -1L)
+  else
+    let fan = fan t h in
+    let low = if fan = 0 then 0L else t.fans.(fan - 1) in
+    (low, t.fans.(fan))
 
 let update t hash off =
   let fan = fan t hash in

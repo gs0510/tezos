@@ -55,6 +55,7 @@ module Make_ext
        and type step = Path.step
        and type metadata = Metadata.t
        and type Key.step = Path.step
+       and type Private.Sync.endpoint = unit
 
   val integrity_check :
     ?ppf:Format.formatter ->
@@ -67,6 +68,10 @@ module Make_ext
       also try to fix the issues. [ppf] is a formatter for progressive
       reporting. [`Fixed] and [`Corrupted] report the number of fixed/corrupted
       entries. *)
+
+  val sync : repo -> unit
+
+  val ro_sync : repo -> unit
 end
 
 module Make
@@ -84,6 +89,7 @@ module Make
        and type contents = C.t
        and type branch = B.t
        and type hash = H.t
+       and type Private.Sync.endpoint = unit
 
   val integrity_check :
     ?ppf:Format.formatter ->
@@ -96,6 +102,10 @@ module Make
       also try to fix the issues. [ppf] is a formatter for progressive
       reporting. [`Fixed] and [`Corrupted] report the number of fixed/corrupted
       entries. *)
+
+  val sync : repo -> unit
+
+  val ro_sync : repo -> unit
 end
 
 module KV (Config : CONFIG) : Irmin.KV_MAKER
@@ -104,6 +114,23 @@ module Atomic_write (K : Irmin.Type.S) (V : Irmin.Hash.S) : sig
   include Irmin.ATOMIC_WRITE_STORE with type key = K.t and type value = V.t
 
   val v : ?fresh:bool -> ?readonly:bool -> string -> t Lwt.t
+
+  val sync : t -> unit
 end
 
 module Stats = Stats
+
+val config_layers :
+  ?conf:Irmin.config ->
+  ?lower_root:string ->
+  ?upper_root1:string ->
+  ?upper_root0:string ->
+  ?keep_max:bool ->
+  ?pause_copy:int ->
+  ?pause_add:int ->
+  unit ->
+  Irmin.config
+
+module Make_ext_layered = Pack_layers.Make_ext
+module Make_layered = Pack_layers.Make
+module Stats_layers = Irmin_layers.Stats
