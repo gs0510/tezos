@@ -15,6 +15,7 @@
             ptime.clock.os
             mtime
             mtime.clock.os
+            re
             lwt_log))
 
 (alias

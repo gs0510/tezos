@@ -23,7 +23,7 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-type t = int32
+type t = int32 [@@deriving repr]
 
 let equal x y = Compare.Int32.equal x y
 

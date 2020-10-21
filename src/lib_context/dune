@@ -7,7 +7,9 @@
             digestif.c
             irmin
             irmin-pack
-            tezos-stdlib-unix)
+            irmin-pack.layered
+            tezos-stdlib-unix
+            rusage)
  (flags (:standard -open Tezos_shell_services
                    -open Tezos_base__TzPervasives
                    -open Tezos_stdlib_unix

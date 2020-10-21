@@ -27,7 +27,7 @@
    time: if a block has fewer than 12 predecessors then it is padded
    so its size remain constant. *)
 module Block_info = struct
-  type t = {offset : int; predecessors : Block_hash.t list}
+  type t = {offset : int; predecessors : Block_key.t list} [@@deriving repr]
 
   let max_predecessors = 12
 

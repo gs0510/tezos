@@ -38,3 +38,24 @@ let encoded_size = Block_hash.size (* in bytes *)
 let decode str off =
   let str = String.sub str off encoded_size in
   Block_hash.of_string_exn str
+
+let of_string_result : string -> (t, [`Msg of string]) result =
+ fun s ->
+  match of_string s with
+  | Ok x ->
+      Ok x
+  | Error err ->
+      Error
+        (`Msg
+          (Format.asprintf
+             "Failed to read b58check_encoding data: %a"
+             Error_monad.pp_print_error
+             err))
+
+let t : t Irmin.Type.t =
+  Irmin.Type.map
+    ~pp
+    ~of_string:of_string_result
+    Irmin.Type.(string_of (`Fixed size))
+    of_string_exn
+    to_string

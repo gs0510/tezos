@@ -109,7 +109,11 @@ val commit :
   time:Time.Protocol.t -> ?message:string -> context -> Context_hash.t Lwt.t
 
 val freeze :
-  max:Context_hash.t -> heads:Context_hash.t list -> index -> unit Lwt.t
+  ?recovery:bool ->
+  max:Context_hash.t ->
+  heads:Context_hash.t list ->
+  index ->
+  unit Lwt.t
 
 val set_head : index -> Chain_id.t -> Context_hash.t -> unit Lwt.t
 

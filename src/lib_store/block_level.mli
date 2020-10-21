@@ -28,6 +28,9 @@
 (** The type for block levels *)
 type t = int32
 
+(** The type representation for block levels *)
+val t : t Irmin.Type.t
+
 (** Equality *)
 val equal : t -> t -> bool
 

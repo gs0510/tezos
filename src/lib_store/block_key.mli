@@ -40,3 +40,6 @@ val encode : t -> string
 
 (** Decoder *)
 val decode : string -> int -> t
+
+(** Type representation for [t] *)
+val t : t Irmin.Type.t
