@@ -373,11 +373,19 @@ module Make (Proto : Registered_protocol.T) = struct
     let context =
       Shell_context.unwrap_disk_context validation_result.context
     in
+    let start = Systime_os.now () in
     Context.commit
       ~time:block_header.shell.timestamp
       ?message:validation_result.message
       context
     >>= fun context_hash ->
+    let elapsed = Ptime.diff (Systime_os.now ()) start in
+    Format.printf
+      "[Validator RW]: %s executed in %a@.loc: %s@."
+      "apply -> Context.commit"
+      Ptime.Span.pp
+      elapsed
+      __LOC__ ;
     let validation_store =
       {
         context_hash;

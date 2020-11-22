@@ -196,6 +196,19 @@ let handshake input output =
     (not (Bytes.equal magic External_validation.magic))
     (inconsistent_handshake "bad magic")
 
+let timer f ~msg ~loc =
+  let start = Systime_os.now () in
+  f ()
+  >>= fun res ->
+  let elapsed = Ptime.diff (Systime_os.now ()) start in
+  Format.printf
+    "[Validator RW]: %s executed in %a@.loc: %s@."
+    msg
+    Ptime.Span.pp
+    elapsed
+    loc ;
+  Lwt.return res
+
 let init input =
   lwt_emit Initialization_request
   >>= fun () ->
@@ -209,9 +222,13 @@ let init input =
   let sandbox_param =
     Option.map (fun p -> ("sandbox_parameter", p)) sandbox_parameters
   in
-  Context.init
-    ~patch_context:(Patch_context.patch_context genesis sandbox_param)
-    context_root
+  timer
+    (fun () ->
+      Context.init
+        ~patch_context:(Patch_context.patch_context genesis sandbox_param)
+        context_root)
+    ~msg:"init request -> Context.init"
+    ~loc:__LOC__
   >>= fun context_index ->
   Lwt.return
     ( context_index,
@@ -245,11 +262,15 @@ let run input output =
           lwt_emit (Commit_genesis_request genesis.block)
           >>= fun () ->
           Error_monad.protect (fun () ->
-              Context.commit_genesis
-                context_index
-                ~chain_id
-                ~time:genesis.time
-                ~protocol:genesis.protocol)
+                  timer
+                    (fun () ->
+                      Context.commit_genesis
+                        context_index
+                        ~chain_id
+                        ~time:genesis.time
+                        ~protocol:genesis.protocol)
+                    ~msg:"Commit_genesis request -> Context.commit_genesis"
+                    ~loc:__LOC__)
           >>= fun commit ->
           External_validation.send
             output
@@ -277,7 +298,11 @@ let run input output =
           >>= fun () ->
           Error_monad.protect (fun () ->
               let pred_context_hash = predecessor_block_header.shell.context in
-              Context.checkout context_index pred_context_hash
+              timer
+                    (fun () ->
+                      Context.checkout context_index pred_context_hash)
+                    ~msg:"validate request -> Context.checkout"
+                    ~loc:__LOC__
               >>= function
               | Some context ->
                   return context
@@ -286,7 +311,10 @@ let run input output =
                     (Block_validator_errors.Failed_to_checkout_context
                        pred_context_hash))
           >>=? (fun predecessor_context ->
-                 Context.get_protocol predecessor_context
+                 timer
+                       (fun () -> Context.get_protocol predecessor_context)
+                       ~msg:"validate request -> Context.get_protocol"
+                       ~loc:__LOC__
                  >>=? fun protocol_hash ->
                  load_protocol protocol_hash protocol_root
                  >>=? fun () ->
@@ -325,7 +353,10 @@ let run input output =
         let fork_test_chain : unit Lwt.t =
           lwt_emit (Fork_test_chain_request forked_header)
           >>= fun () ->
-          Context.checkout context_index context_hash
+                   timer
+                      (fun () -> Context.checkout context_index context_hash)
+                      ~msg:"Fork_test_chain request -> Context.checkout"
+                      ~loc:__LOC__
           >>= function
           | Some ctxt ->
               Block_validation.init_test_chain ctxt forked_header
