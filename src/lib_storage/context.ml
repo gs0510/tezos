@@ -495,14 +495,35 @@ let set_predecessor_ops_metadata_hash v hash =
 
 (*-- Initialisation ----------------------------------------------------------*)
 
-let init ?patch_context ?mapsize:_ ?readonly root =
-  Store.Repo.v
-    (Irmin_pack.config ?readonly ?index_log_size:!index_log_size root)
-  >>= fun repo ->
-  let v = {path = root; repo; patch_context} in
-  Lwt.return v
+let init ?patch_context ?mapsize:_ ?(readonly = false) root =
+  let config =
+    Irmin_pack.config
+      ~readonly
+      ?index_log_size:!index_log_size
+      root
+  in
+  let open_store () =
+    Store.Repo.v config
+    >>= fun repo ->
+    let v = {path = root; repo; patch_context; readonly} in
+    Lwt.return v
+  in
+  Lwt.catch open_store (function
+      | Irmin_pack.Unsupported_version `V1 ->
+          Logs.app (fun l -> l "migrating store to v2, this may take a while") ;
+          Store.migrate config ;
+          Logs.app (fun l -> l "migration ended, opening store") ;
+          open_store ()
+      | exn ->
+          Lwt.fail exn)
 
-let close index = Store.Repo.close index.repo
+let with_timer f =
+  let t0 = Sys.time () in
+  f () >|= fun () -> Sys.time () -. t0
+
+let close index =
+  with_timer (fun () -> Store.Repo.close index.repo)
+  >|= fun t -> Fmt.epr "closing index %f" t
 
 let get_branch chain_id = Format.asprintf "%a" Chain_id.pp chain_id
 
