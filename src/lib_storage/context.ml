@@ -96,6 +96,21 @@ module Store =
 
 module P = Store.Private
 
+module Checks = struct
+  module Pack =
+    Irmin_pack.Checks.Make (Conf) (Irmin.Metadata.None) (Contents)
+      (Irmin.Path.String_list)
+      (Irmin.Branch.String)
+      (Hash)
+      (Node)
+      (Commit)
+
+  module Index = struct
+    module I = Irmin_pack.Index.Make (Hash)
+    include I.Checks
+  end
+end
+
 type index = {
   path : string;
   repo : Store.Repo.t;
