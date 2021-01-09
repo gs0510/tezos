@@ -1,6 +1,8 @@
 (library
  (name tezos_storage)
  (public_name tezos-storage)
+ (preprocess
+  (pps ppx_deriving_yojson))
  (libraries tezos-base
             tezos-shell-services
             tezos-lmdb
@@ -8,7 +10,8 @@
             digestif.c
             irmin
             irmin-pack
-            tezos-stdlib-unix)
+            tezos-stdlib-unix
+            yojson ppx_deriving_yojson)
  (flags (:standard -open Tezos_shell_services
                    -open Tezos_base__TzPervasives
                    -open Tezos_stdlib_unix
