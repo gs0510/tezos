@@ -600,6 +600,7 @@ let config ?readonly root =
     Irmin_pack.config
       ?readonly
       ?index_log_size:!index_log_size
+      ~freeze_throttle:`Cancel_existing
       root
   in
   Irmin_pack_layered.config
