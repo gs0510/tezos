@@ -246,44 +246,8 @@ let pp_stats () =
     !total ;
   total := 0
 
-let timers = Queue.create ()
-
-let done_boot = ref false
-
-let done_bootstrapping () =
-  if !done_boot then true
-  else if !counter < 6 then false
-  else
-    let t = Queue.pop timers in
-    let timers' = Queue.copy timers in
-    let rec check t i acc =
-      if i < 5 then
-        let t' = Queue.pop timers' in
-        Ptime.Span.sub t' t |> Ptime.Span.to_int_s
-        |> function
-        | None -> assert false | Some t -> check t' (i + 1) (t > 30 && acc)
-      else acc
-    in
-    let ok = check t 0 true in
-    if ok then (
-      Logs.app (fun l -> l "done bootstrapping") ;
-      done_boot := true ) ;
-    ok
-
-let min_uppers = Queue.create ()
-
-let add_min c = Queue.add c min_uppers
-
-let consume_min () = ignore (Queue.pop min_uppers)
-
-let get_min () = Queue.top min_uppers
-
 let raw_commit ~time ?(message = "") context =
   counter := succ !counter ;
-  let () =
-    let time = Systime_os.now () in
-    Queue.add (Ptime.to_span time) timers
-  in
   let info =
     Irmin.Info.v ~date:(Time.Protocol.to_seconds time) ~author:"Tezos" message
   in
@@ -293,18 +257,18 @@ let raw_commit ~time ?(message = "") context =
   Store.Commit.v context.index.repo ~info ~parents context.tree
   >>= fun h ->
   maxrss_stat h ;
-  if !counter = 1 then add_min h ;
-  if !counter mod 4096 = 0 then add_min h ;
-  ( match done_bootstrapping () with
-  | true ->
-      if !counter mod 50 = 0 then (
-        pp_stats () ;
-        let m = get_min () in
-        Store.freeze ~min_upper:[m] ~max:[h] context.index.repo )
-      else Lwt.return_unit
-  | false ->
-      if !counter > 20480 && !counter mod 4096 = 0 then consume_min () ;
-      Lwt.return_unit )
+  (if !counter = 2 then (
+      (match (Irmin.Type.of_string Hash.t) "CoVq9zoKPHJ4viVphAft2qwnC6r7d4gZ2jvCSMp27V7kDwRvgLii" with
+       | Ok x ->
+         (Store.Commit.of_hash context.index.repo x >>= function
+           | None -> Lwt.fail_with "error converting hash to commit"
+           | Some x -> Lwt.return [x])
+      | Error (`Msg msg) -> Lwt.fail_with (Format.sprintf "error reading hash %s" msg))
+      >>= fun min_upper ->
+      pp_stats () ;
+      Store.freeze ~min_upper ~max:[h] context.index.repo )
+   else
+     Lwt.return_unit)
   >|= fun () ->
   Store.Tree.clear context.tree ;
   h
