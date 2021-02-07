@@ -97,13 +97,15 @@ module Store =
 module P = Store.Private
 
 module Checks = struct
-  module Pack =
-    Irmin_pack.Checks.Make (Conf) (Irmin.Metadata.None) (Contents)
+  module Maker (V : Irmin_pack.VERSION) =
+    Irmin_pack.Make_ext (V) (Conf) (Irmin.Metadata.None) (Contents)
       (Irmin.Path.String_list)
       (Irmin.Branch.String)
       (Hash)
       (Node)
       (Commit)
+
+  module Pack : Irmin_pack.Checks.S = Irmin_pack.Checks.Make (Maker)
 
   module Index = struct
     module I = Irmin_pack.Index.Make (Hash)

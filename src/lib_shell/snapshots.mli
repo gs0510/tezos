@@ -55,3 +55,7 @@ val reconstruct :
   State.Chain.t ->
   Context.index ->
   unit tzresult Lwt.t
+
+val parse_block : State.Chain.t ->
+Store.Chain_data.store ->
+Genesis.t -> string option -> (Block_hash.t, tztrace) result Lwt.t

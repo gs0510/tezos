@@ -25,12 +25,10 @@
 
 let term_name = "storage"
 
-
 let ( // ) = Filename.concat
 
 module Term = struct
   open Cmdliner
-
   open Node_shared_arg.Term
 
   (* [Cmdliner] terms are not nestable, so we implement an ad-hoc mechanism for
@@ -41,72 +39,162 @@ module Term = struct
   type subcommand = {
     name : string;
     description : string;
-    term : unit Term.t;
+    term : [`Error of bool * string | `Ok of unit] Term.t;
   }
-
-  let read_data_dir (config : Node_config_file.t) data_dir =
-    let data_dir = Option.value ~default:config.data_dir data_dir in
-    return data_dir
-
-  let read_config_file config_file =
-    match config_file with
-    | Some config_file ->
-        if Sys.file_exists config_file then Node_config_file.read config_file
-        else return Node_config_file.default_config
-    | None ->
-        return Node_config_file.default_config
-
-  let get_root data_dir config_file =
-    read_config_file config_file >>= fun config ->
-    let config = Result.get_ok config in
-    read_data_dir config data_dir >|= fun root ->
-    Result.get_ok root
 
   let auto_repair =
     let open Cmdliner.Arg in
-    value & (flag @@ info ~doc:"Automatically repair issues" [ "auto-repair" ])
+    value
+    & flag
+      @@ info
+           ~doc:"Automatically repair issues; option for integrity-check"
+           ["auto-repair"]
+
+  let read_config_file config_file =
+    match config_file with
+    | Some config_file when Sys.file_exists config_file ->
+        Node_config_file.read config_file
+    | _ ->
+        return Node_config_file.default_config
+
+  let ensure_context_dir context_dir =
+    Lwt.catch
+      (fun () ->
+        Lwt_unix.file_exists context_dir
+        >>= function
+        | false ->
+            fail (Node_data_version.Invalid_data_dir context_dir)
+        | true -> (
+            let pack = context_dir // "store.pack" in
+            Lwt_unix.file_exists pack
+            >>= function
+            | false ->
+                fail (Node_data_version.Invalid_data_dir context_dir)
+            | true ->
+                return_unit ))
+      (function
+        | Unix.Unix_error _ ->
+            fail (Node_data_version.Invalid_data_dir context_dir)
+        | exc ->
+            raise exc)
+
+  let root config_file data_dir =
+    read_config_file config_file
+    >>=? fun cfg ->
+    let data_dir = Option.value ~default:cfg.data_dir data_dir in
+    let context_dir = Node_data_version.context_dir data_dir in
+    ensure_context_dir context_dir >>=? fun () -> return context_dir
+
+  let run main_promise =
+    match Lwt_main.run @@ Lwt_exit.wrap_and_exit main_promise with
+    | Ok () ->
+        `Ok ()
+    | Error err ->
+        `Error (false, Format.asprintf "%a" pp_print_error err)
 
   let integrity_check =
     let open Term in
-    const (fun data_dir config_file auto_repair ->
-      let main =
-        get_root data_dir config_file >>= fun root ->
-        let root = root // "context" in
-        Context.Checks.Pack.Integrity_check.run ~root ~auto_repair
-      in Lwt_main.run main
-    ) $ data_dir $ config_file $ auto_repair
+    const (fun config_file data_dir auto_repair ->
+        let main =
+          root config_file data_dir
+          >>=? fun root ->
+          Context.Checks.Pack.Integrity_check.run ~root ~auto_repair
+          >>= fun () -> return_unit
+        in
+        run main)
+    $ config_file $ data_dir $ auto_repair
 
   let stat_index =
     let open Term in
-    const (fun data_dir config_file ->
-      let root = Lwt_main.run (get_root data_dir config_file) in
-      let root = root // "context" in
-      Context.Checks.Index.Stat.run ~root
-    ) $ data_dir $ config_file
+    const (fun config_file data_dir ->
+        let main =
+          root config_file data_dir
+          >>=? fun root ->
+          Context.Checks.Index.Stat.run ~root ;
+          return_unit
+        in
+        run main)
+    $ config_file $ data_dir
 
   let stat_pack =
     let open Term in
-    const (fun data_dir config_file ->
-      let main =
-        get_root data_dir config_file >>= fun root ->
-        let root = root // "context" in
-        Context.Checks.Pack.Stat.run ~root
-      in Lwt_main.run main
-    ) $ data_dir $ config_file
+    const (fun config_file data_dir ->
+        let main =
+          root config_file data_dir
+          >>=? fun root ->
+          Context.Checks.Pack.Stat.run ~root >>= fun () -> return_unit
+        in
+        run main)
+    $ config_file $ data_dir
 
   let dest =
     let open Cmdliner.Arg in
     value
-      & opt (some string) None
-      @@ info ~doc:"Path to the new index file" ~docv:"DEST" ["output"; "o"]
+    & opt (some string) None
+      @@ info
+           ~doc:"Path to the new index file; option for reconstruct-index"
+           ~docv:"DEST"
+           ["output"; "o"]
 
   let reconstruct_index =
     let open Term in
-    const (fun data_dir config_file output ->
-      let root = Lwt_main.run (get_root data_dir config_file) in
-      let root = root // "context" in
-      Context.Checks.Pack.Reconstruct_index.run ~root ~output;
-    ) $ data_dir $ config_file $ dest
+    const (fun config_file data_dir output ->
+        let main =
+          root config_file data_dir
+          >>=? fun root ->
+          Context.Checks.Pack.Reconstruct_index.run ~root ~output ;
+          return_unit
+        in
+        run main)
+    $ config_file $ data_dir $ dest
+
+  let heads =
+    let open Cmdliner.Arg in
+    value
+    & opt (some string) None
+      @@ info
+           ~doc:"Heads; option for integrity-check-inodes"
+           ~docv:"HEADS"
+           ["heads"; "h"]
+
+  let head_hash config data_dir block =
+    let context_root = Node_data_version.context_dir data_dir in
+    let store_root = Node_data_version.store_dir data_dir in
+    Store.init ~mapsize:40_960_000_000L store_root
+    >>=? fun store ->
+    let genesis = config.Node_config_file.blockchain_network.genesis in
+    State.init ~context_root ~store_root genesis
+    >>=? fun (state, chain_state, _context_index, _history_mode) ->
+    let chain_id = Chain_id.of_block_hash genesis.block in
+    let chain_store = Store.Chain.get store chain_id in
+    let chain_data_store = Store.Chain_data.get chain_store in
+    Snapshots.parse_block chain_state chain_data_store genesis block
+    >>= fun b -> let str = Block_hash.to_string b in Printf.printf "context hash %s\n%!" str;
+    Store.close store ;
+    State.close state >>= fun () -> return str
+(*    let store_dir = Node_data_version.store_dir data_dir in
+    let context_dir = Node_data_version.context_dir data_dir in
+    Store.init ~store_dir ~context_dir ~allow_testchains:true genesis
+    >>= fun store ->
+    let store = Result.get_ok store in
+    let chain_store = Store.main_chain_store store in
+    Store.Chain.current_head chain_store
+    >|= fun b -> Block_hash.to_hex (Store.Block.hash b) |> Hex.show*)
+
+  let integrity_check_inodes =
+    let open Term in
+    const (fun config_file data_dir ->
+        let main =
+          root config_file data_dir
+          >>=? fun root ->
+          let heads =
+            Some ["CoV5KDUMDSxogp6QWTMxhBAw3Bjp2LfWcA95qLLusfQUA3neKC3y"]
+          in
+          Context.Checks.Pack.Integrity_check_inodes.run ~root ~heads
+          >>= fun () -> return_unit
+        in
+        run main)
+    $ config_file $ data_dir
 
   let terms =
     [ {
@@ -128,9 +216,14 @@ module Term = struct
         name = "reconstruct-index";
         description = "Reconstruct index from pack file.";
         term = reconstruct_index;
+      };
+      {
+        name = "integrity-check-inodes";
+        description = "Search the store for corrupted inodes.";
+        term = integrity_check_inodes;
       } ]
 
-  let dispatch_subcommand _ _ = function
+  let dispatch_subcommand _ _ _ _ _ = function
     | None ->
         `Help (`Auto, Some term_name)
     | Some n -> (
@@ -168,14 +261,17 @@ module Term = struct
             ( command.term,
               Term.info (binary_name ^ " " ^ term_name ^ " " ^ command.name) )
           |> function
-          | `Ok () -> `Ok ()
+          | `Ok (`Ok ()) ->
+              `Ok ()
+          | `Ok (`Error e) ->
+              `Error e
           | `Help | `Version ->
               (* Parent term evaluation intercepts [--help] and [--version] *)
               assert false
           | `Error _ -> (
               (* We want to display the usage information for the selected
-                         subcommand, but [Cmdliner] will only do this at evaluation
-                         time *)
+                 subcommand, but [Cmdliner] will only do this at evaluation
+                 time *)
               Term.eval
                 ~argv:[|""; "--help=plain"|]
                 ( command.term,
@@ -192,8 +288,8 @@ module Term = struct
     in
     Term.(
       ret
-        ( const dispatch_subcommand $
-        config_file $ data_dir $ subcommand  ))
+        ( const dispatch_subcommand $ config_file $ data_dir $ auto_repair
+        $ dest $ heads $ subcommand ))
 end
 
 module Manpage = struct

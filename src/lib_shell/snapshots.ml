@@ -493,6 +493,30 @@ let parse_block_arg = function
     | Error err ->
         failwith "Invalid value for `--block`: %s" err )
 
+let parse_block chain_state chain_data_store genesis block =
+  parse_block_arg block
+  >>=? (function
+      | Some block -> (
+          Block_directory.get_block chain_state block
+             >>= function
+             | None ->
+                 fail
+                   (Wrong_block_export
+                      (Unknown_block (Block_services.to_string block)))
+             | Some bh ->
+                 return (State.Block.hash bh) )
+         | None ->
+             Store.Chain_data.Checkpoint.read_opt chain_data_store
+             >|= WithExceptions.Option.get ~loc:__LOC__
+             >>= fun last_checkpoint ->
+             if last_checkpoint.shell.level = 0l then
+               fail (Wrong_block_export (Too_few_predecessors genesis.Genesis.block))
+             else
+               let last_checkpoint_hash = Block_header.hash last_checkpoint in
+               lwt_emit (Export_unspecified_hash last_checkpoint_hash)
+               >>= fun () -> return last_checkpoint_hash)
+
+
 let export ?(export_rolling = false) ~context_root ~store_root ~genesis
     filename ~block =
   State.init ~context_root ~store_root genesis ~readonly:true
