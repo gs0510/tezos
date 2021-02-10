@@ -34,11 +34,11 @@ let reporter () =
   let report src level ~over k msgf =
     let k _ = over () ; k () in
     let with_stamp h _tags k fmt =
-      let dt = Mtime.Span.to_us (Mtime_clock.elapsed ()) in
+      let dt = Mtime_clock.now_ns () in
       Fmt.kpf
         k
         Fmt.stderr
-        ("%+04.0fus %a %a @[" ^^ fmt ^^ "@]@.")
+        ("%Ldns %a %a @[" ^^ fmt ^^ "@]@.")
         dt
         Fmt.(styled `Magenta string)
         (Logs.Src.name src)
@@ -197,8 +197,10 @@ let maxrss_stat h =
     Int64.to_int (usage.maxrss / 1024L / 1024L)
   in
   let objs = commit_stats () in
+  let dt = Mtime_clock.now_ns () in
   Format.printf
-    "commit %a number %d, maxrss %d, objects %d\n%!"
+    "%Ldns commit %a number %d, maxrss %d, objects %d\n%!"
+    dt
     Store.Commit.pp_hash
     h
     !counter
