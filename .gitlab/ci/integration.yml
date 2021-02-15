@@ -102,7 +102,7 @@ integration:sandboxes:daemons-upgrade:
     - mkdir tests_python/tmp
     - cd tests_python
   after_script:
-    - tail -n +1 tmp/*
+    - tail -n +1 tests_python/tmp/*
   # python scripts don't need the _build directory
   # but only the binaries in the artifacts
   cache: {}
@@ -313,6 +313,12 @@ integration:alpha_baker_endorser:
     - poetry run pytest tests_alpha/test_baker_endorser.py -s --log-dir=tmp
   stage: test
 
+integration:alpha_block_times_ideal_scenario:
+  extends: .integration_python_template
+  script:
+    - poetry run pytest tests_alpha/test_block_times_ideal_scenario.py -s --log-dir=tmp
+  stage: test
+
 integration:alpha_bootstrap:
   extends: .integration_python_template
   script:
@@ -389,6 +395,12 @@ integration:alpha_nonce_seed_revelation:
   extends: .integration_python_template
   script:
     - poetry run pytest tests_alpha/test_nonce_seed_revelation.py -s --log-dir=tmp
+  stage: test
+
+integration:alpha_perf_endorsement:
+  extends: .integration_python_template
+  script:
+    - poetry run pytest tests_alpha/test_perf_endorsement.py -s --log-dir=tmp
   stage: test
 
 integration:alpha_proxy:

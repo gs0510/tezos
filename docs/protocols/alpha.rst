@@ -25,3 +25,25 @@ to Edo.
   5. Adoption       --> Adoption
 
 - The protocol does not spawn a testchain during the third voting period, now called `Cooldown` period
+
+- Increase max_operation_size constant of the protocol from 16KB to 32KB.
+
+  This has the effect of slightly more than doubling the maximum size of a smart contract, but also allows for larger operations in general.
+
+- Proto: endorsement and double endorsing evidence operations now contain an additional slot field; the slot should be the smallest among the endorser's slots.
+
+  MR: https://gitlab.com/tezos/tezos/-/merge_requests/2471
+
+  Software that make use of operations and receipts will have to be
+  adapted, in particular indexers.
+
+  Most notably, the first list of operations is now composed of
+  `endorsement_with_slot` instead of `endorsement` operations.
+
+  The change will not affect custom signing stacks, as the
+  `endorsement_with_slot` is just an unsigned wrapper around the
+  Edo-compatible `endorsement` format.
+
+  The reference endorser forges an `endorsement`, sends it to the
+  signer, and then wraps the result in an `endorsement_with_slot`
+  before injection.

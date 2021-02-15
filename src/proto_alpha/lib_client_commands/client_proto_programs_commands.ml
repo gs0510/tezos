@@ -220,7 +220,7 @@ let commands () =
     command
       ~group
       ~desc:"Ask the node to run a script."
-      (args8
+      (args9
          trace_stack_switch
          amount_arg
          balance_arg
@@ -228,7 +228,8 @@ let commands () =
          payer_arg
          no_print_source_flag
          custom_gas_flag
-         entrypoint_arg)
+         entrypoint_arg
+         (unparsing_mode_arg ~default:"Readable"))
       ( prefixes ["run"; "script"]
       @@ Program.source_param
       @@ prefixes ["on"; "storage"]
@@ -243,7 +244,8 @@ let commands () =
              payer,
              no_print_source,
              gas,
-             entrypoint )
+             entrypoint,
+             unparsing_mode )
            program
            storage
            input
@@ -263,6 +265,7 @@ let commands () =
             ~program
             ~storage
             ~input
+            ~unparsing_mode
             ?source
             ?payer
             ?gas
@@ -280,6 +283,7 @@ let commands () =
             ~program
             ~storage
             ~input
+            ~unparsing_mode
             ?source
             ?payer
             ?gas
@@ -460,6 +464,69 @@ let commands () =
             >>= fun () -> return_unit);
     command
       ~group
+      ~desc:"Ask the node to normalize a script."
+      (args1 (unparsing_mode_arg ~default:"Readable"))
+      (prefixes ["normalize"; "script"] @@ Program.source_param @@ stop)
+      (fun unparsing_mode program cctxt ->
+        Lwt.return @@ Micheline_parser.no_parsing_error program
+        >>=? fun program ->
+        Alpha_services.Helpers.Scripts.normalize_script
+          cctxt
+          (cctxt#chain, cctxt#block)
+          ~script:program.expanded
+          ~unparsing_mode
+        >>= function
+        | Ok program ->
+            cctxt#message
+              "%a"
+              (fun ppf () ->
+                (Michelson_v1_printer.print_expr_unwrapped ppf program : unit))
+              ()
+            >>= fun () -> return_unit
+        | Error errs ->
+            cctxt#warning
+              "%a"
+              (Michelson_v1_error_reporter.report_errors
+                 ~details:false
+                 ~show_source:false
+                 ?parsed:None)
+              errs
+            >>= fun () -> cctxt#error "ill-typed script");
+    command
+      ~group
+      ~desc:"Ask the node to normalize a data expression."
+      (args2 (unparsing_mode_arg ~default:"Readable") legacy_switch)
+      ( prefixes ["normalize"; "data"]
+      @@ param
+           ~name:"data"
+           ~desc:"the data expression to normalize"
+           data_parameter
+      @@ prefixes ["of"; "type"]
+      @@ param ~name:"type" ~desc:"type of the data expression" data_parameter
+      @@ stop )
+      (fun (unparsing_mode, legacy) data typ cctxt ->
+        Alpha_services.Helpers.Scripts.normalize_data
+          cctxt
+          (cctxt#chain, cctxt#block)
+          ~legacy
+          ~data:data.expanded
+          ~ty:typ.expanded
+          ~unparsing_mode
+        >>= function
+        | Ok expr ->
+            cctxt#message "%a" Michelson_v1_printer.print_expr_unwrapped expr
+            >>= fun () -> return_unit
+        | Error errs ->
+            cctxt#warning
+              "%a"
+              (Michelson_v1_error_reporter.report_errors
+                 ~details:false
+                 ~show_source:false
+                 ?parsed:None)
+              errs
+            >>= fun () -> cctxt#error "ill-typed data expression");
+    command
+      ~group
       ~desc:
         "Sign a raw sequence of bytes and display it using the format \
          expected by Michelson instruction `CHECK_SIGNATURE`."
@@ -479,9 +546,9 @@ let commands () =
         "Check the signature of a byte sequence as per Michelson instruction \
          `CHECK_SIGNATURE`."
       (args1 (switch ~doc:"Use only exit codes" ~short:'q' ~long:"quiet" ()))
-      ( prefixes ["check"; "that"]
+      ( prefixes ["check"; "that"; "bytes"]
       @@ bytes_parameter ~name:"bytes" ~desc:"the signed data"
-      @@ prefixes ["was"; "signed"; "by"]
+      @@ prefixes ["were"; "signed"; "by"]
       @@ Client_keys.Public_key.alias_param ~name:"key"
       @@ prefixes ["to"; "produce"]
       @@ param

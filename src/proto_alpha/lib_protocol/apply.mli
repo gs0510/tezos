@@ -33,6 +33,8 @@ type error += Duplicate_endorsement of Signature.Public_key_hash.t
 
 type error += Invalid_endorsement_level
 
+type error += Unwrapped_endorsement
+
 type error += Invalid_commitment of {expected : bool}
 
 type error += Internal_operation_replay of packed_internal_operation
@@ -96,6 +98,8 @@ type error +=
       endorsements : int;
       timestamp : Time.t;
     }
+
+type error += (* `Permanent *) Failing_noop_error
 
 val begin_partial_construction : t -> (t, error trace) result Lwt.t
 

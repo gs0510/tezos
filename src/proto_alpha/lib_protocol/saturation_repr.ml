@@ -64,6 +64,10 @@ let of_z_opt z =
 
 let to_z x = Z.of_int x
 
+let saturate_if_undef = function None -> saturated | Some x -> x
+
+let safe_int x = of_int_opt x |> saturate_if_undef
+
 let zero = 0
 
 let small_enough z =
@@ -73,6 +77,23 @@ let small_enough z =
   z land 0x7fffffff80000000 = 0
 
 let mul_safe x = if small_enough x then Some x else None
+
+let mul_safe_exn x =
+  if small_enough x then x
+  else failwith (Format.sprintf "mul_safe_exn: %d must be below 2147483648" x)
+
+let mul_safe_of_int_exn x =
+  Option.bind (of_int_opt x) mul_safe
+  |> function
+  | None ->
+      failwith
+        (Format.sprintf "mul_safe_of_int_exn: %d must be below 2147483648" x)
+  | Some x ->
+      x
+
+(* If [x] is positive, shifting to the right will produce a number
+   which is positive and is less than [x]. *)
+let shift_right x y = (x :> int) lsr y
 
 let mul x y =
   (* assert (x >= 0 && y >= 0); *)

@@ -28,6 +28,8 @@
 module Kind = struct
   type seed_nonce_revelation = Seed_nonce_revelation_kind
 
+  type endorsement_with_slot = Endorsement_with_slot_kind
+
   type double_endorsement_evidence = Double_endorsement_evidence_kind
 
   type double_baking_evidence = Double_baking_evidence_kind
@@ -47,6 +49,8 @@ module Kind = struct
   type origination = Origination_kind
 
   type delegation = Delegation_kind
+
+  type failing_noop = Failing_noop_kind
 
   type 'a manager =
     | Reveal_manager_kind : reveal manager
@@ -82,9 +86,15 @@ and _ contents =
       nonce : Seed_repr.nonce;
     }
       -> Kind.seed_nonce_revelation contents
+  | Endorsement_with_slot : {
+      endorsement : Kind.endorsement operation;
+      slot : int;
+    }
+      -> Kind.endorsement_with_slot contents
   | Double_endorsement_evidence : {
       op1 : Kind.endorsement operation;
       op2 : Kind.endorsement operation;
+      slot : int;
     }
       -> Kind.double_endorsement_evidence contents
   | Double_baking_evidence : {
@@ -110,6 +120,7 @@ and _ contents =
       ballot : Vote_repr.ballot;
     }
       -> Kind.ballot contents
+  | Failing_noop : string -> Kind.failing_noop contents
   | Manager_operation : {
       source : Signature.public_key_hash;
       fee : Tez_repr.tez;
@@ -431,6 +442,26 @@ module Encoding = struct
         inj = (fun (level, nonce) -> Seed_nonce_revelation {level; nonce});
       }
 
+  let endorsement_with_slot_case : Kind.endorsement_with_slot case =
+    Case
+      {
+        tag = 10;
+        name = "endorsement_with_slot";
+        encoding =
+          obj2
+            (req "endorsement" (dynamic_size endorsement_encoding))
+            (req "slot" uint16);
+        select =
+          (function
+          | Contents (Endorsement_with_slot _ as op) -> Some op | _ -> None);
+        proj =
+          (fun (Endorsement_with_slot {endorsement; slot}) ->
+            (endorsement, slot));
+        inj =
+          (fun (endorsement, slot) ->
+            Endorsement_with_slot {endorsement; slot});
+      }
+
   let double_endorsement_evidence_case : Kind.double_endorsement_evidence case
       =
     Case
@@ -438,17 +469,22 @@ module Encoding = struct
         tag = 2;
         name = "double_endorsement_evidence";
         encoding =
-          obj2
+          obj3
             (req "op1" (dynamic_size endorsement_encoding))
-            (req "op2" (dynamic_size endorsement_encoding));
+            (req "op2" (dynamic_size endorsement_encoding))
+            (req "slot" uint16);
         select =
           (function
           | Contents (Double_endorsement_evidence _ as op) ->
               Some op
           | _ ->
               None);
-        proj = (fun (Double_endorsement_evidence {op1; op2}) -> (op1, op2));
-        inj = (fun (op1, op2) -> Double_endorsement_evidence {op1; op2});
+        proj =
+          (fun (Double_endorsement_evidence {op1; op2; slot}) ->
+            (op1, op2, slot));
+        inj =
+          (fun (op1, op2, slot) ->
+            Double_endorsement_evidence {op1; op2; slot});
       }
 
   let double_baking_evidence_case =
@@ -527,6 +563,18 @@ module Encoding = struct
             Ballot {source; period; proposal; ballot});
       }
 
+  let failing_noop_case =
+    Case
+      {
+        tag = 17;
+        name = "failing_noop";
+        encoding = obj1 (req "arbitrary" Data_encoding.string);
+        select =
+          (function Contents (Failing_noop _ as op) -> Some op | _ -> None);
+        proj = (function Failing_noop message -> message);
+        inj = (function message -> Failing_noop message);
+      }
+
   let manager_encoding =
     obj5
       (req "source" Signature.Public_key_hash.encoding)
@@ -593,6 +641,7 @@ module Encoding = struct
     @@ union
          [ make endorsement_case;
            make seed_nonce_revelation_case;
+           make endorsement_with_slot_case;
            make double_endorsement_evidence_case;
            make double_baking_evidence_case;
            make activate_account_case;
@@ -601,7 +650,8 @@ module Encoding = struct
            make reveal_case;
            make transaction_case;
            make origination_case;
-           make delegation_case ]
+           make delegation_case;
+           make failing_noop_case ]
 
   let contents_list_encoding =
     conv to_list of_list (Variable.list contents_encoding)
@@ -670,7 +720,11 @@ let raw ({shell; protocol_data} : _ operation) =
 let acceptable_passes (op : packed_operation) =
   let (Operation_data protocol_data) = op.protocol_data in
   match protocol_data.contents with
+  | Single (Failing_noop _) ->
+      []
   | Single (Endorsement _) ->
+      [0]
+  | Single (Endorsement_with_slot _) ->
       [0]
   | Single (Proposals _) ->
       [1]
@@ -794,6 +848,10 @@ let equal_contents_kind :
       Some Eq
   | (Seed_nonce_revelation _, _) ->
       None
+  | (Endorsement_with_slot _, Endorsement_with_slot _) ->
+      Some Eq
+  | (Endorsement_with_slot _, _) ->
+      None
   | (Double_endorsement_evidence _, Double_endorsement_evidence _) ->
       Some Eq
   | (Double_endorsement_evidence _, _) ->
@@ -813,6 +871,10 @@ let equal_contents_kind :
   | (Ballot _, Ballot _) ->
       Some Eq
   | (Ballot _, _) ->
+      None
+  | (Failing_noop _, Failing_noop _) ->
+      Some Eq
+  | (Failing_noop _, _) ->
       None
   | (Manager_operation op1, Manager_operation op2) -> (
     match equal_manager_operation_kind op1.operation op2.operation with

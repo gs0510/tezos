@@ -27,6 +27,8 @@ open Alpha_context
 
 type error += Cannot_parse_operation (* `Branch *)
 
+type error += Cannot_serialize_log
+
 val current_level :
   'a #RPC_context.simple ->
   ?offset:int32 ->
@@ -40,13 +42,10 @@ val levels_in_current_cycle :
   (Raw_level.t * Raw_level.t) shell_tzresult Lwt.t
 
 module Scripts : sig
-  module Traced_interpreter : sig
-    type error += Cannot_serialize_log
-  end
-
   val run_code :
     'a #RPC_context.simple ->
     'a ->
+    ?unparsing_mode:Script_ir_translator.unparsing_mode ->
     ?gas:Gas.Arith.integral ->
     ?entrypoint:string ->
     script:Script.expr ->
@@ -64,6 +63,7 @@ module Scripts : sig
   val trace_code :
     'a #RPC_context.simple ->
     'a ->
+    ?unparsing_mode:Script_ir_translator.unparsing_mode ->
     ?gas:Gas.Arith.integral ->
     ?entrypoint:string ->
     script:Script.expr ->
@@ -105,6 +105,22 @@ module Scripts : sig
     data:Script.expr ->
     ty:Script.expr ->
     (bytes * Gas.t) shell_tzresult Lwt.t
+
+  val normalize_data :
+    'a #RPC_context.simple ->
+    'a ->
+    ?legacy:bool ->
+    data:Script.expr ->
+    ty:Script.expr ->
+    unparsing_mode:Script_ir_translator.unparsing_mode ->
+    Script.expr shell_tzresult Lwt.t
+
+  val normalize_script :
+    'a #RPC_context.simple ->
+    'a ->
+    script:Script.expr ->
+    unparsing_mode:Script_ir_translator.unparsing_mode ->
+    Script.expr shell_tzresult Lwt.t
 
   val run_operation :
     'a #RPC_context.simple ->
@@ -231,6 +247,14 @@ module Forge : sig
     unit ->
     bytes shell_tzresult Lwt.t
 
+  val failing_noop :
+    'a #RPC_context.simple ->
+    'a ->
+    branch:Block_hash.t ->
+    message:string ->
+    unit ->
+    Bytes.t shell_tzresult Lwt.t
+
   val seed_nonce_revelation :
     'a #RPC_context.simple ->
     'a ->
@@ -255,6 +279,7 @@ module Forge : sig
     branch:Block_hash.t ->
     op1:Kind.endorsement operation ->
     op2:Kind.endorsement operation ->
+    slot:int ->
     unit ->
     bytes shell_tzresult Lwt.t
 

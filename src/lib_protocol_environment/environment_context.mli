@@ -38,6 +38,18 @@ module type TREE = sig
   include Environment_context_intf.TREE
 end
 
+module Equality_witness : sig
+  type (_, _) eq = Refl : ('a, 'a) eq
+
+  type 'a t
+
+  val make : unit -> 'a t
+
+  val eq : 'a t -> 'b t -> ('a, 'b) eq option
+
+  val hash : 'a t -> int
+end
+
 module Context : sig
   type ('ctxt, 'tree) ops =
     (module CONTEXT with type t = 'ctxt and type tree = 'tree)

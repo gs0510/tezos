@@ -29,51 +29,46 @@ type fp_tag
 
 type integral_tag
 
-let scaling_factor = 1000
+module S = Saturation_repr
+
+let scaling_factor = S.mul_safe_of_int_exn 1000
 
 module Arith = struct
-  type 'a t = Saturation_repr.may_saturate Saturation_repr.t
+  type 'a t = S.may_saturate S.t
 
   type fp = fp_tag t
 
   type integral = integral_tag t
 
-  let scaling_factor =
-    match
-      Saturation_repr.(Option.bind (of_int_opt scaling_factor) mul_safe)
-    with
-    | None ->
-        (* since 1000 is not saturated and mul_safe. *) assert false
-    | Some x ->
-        x
+  let scaling_factor = scaling_factor
 
-  let sub = Saturation_repr.sub
+  let sub = S.sub
 
-  let add = Saturation_repr.add
+  let add = S.add
 
-  let zero = Saturation_repr.(may_saturate zero)
+  let zero = S.zero
 
-  let min = Saturation_repr.min
+  let min = S.min
 
-  let max = Saturation_repr.max
+  let max = S.max
 
-  let compare = Saturation_repr.compare
+  let compare = S.compare
 
-  let ( < ) = Saturation_repr.( < )
+  let ( < ) = S.( < )
 
-  let ( <> ) = Saturation_repr.( <> )
+  let ( <> ) = S.( <> )
 
-  let ( > ) = Saturation_repr.( > )
+  let ( > ) = S.( > )
 
-  let ( <= ) = Saturation_repr.( <= )
+  let ( <= ) = S.( <= )
 
-  let ( >= ) = Saturation_repr.( >= )
+  let ( >= ) = S.( >= )
 
-  let ( = ) = Saturation_repr.( = )
+  let ( = ) = S.( = )
 
-  let equal = Saturation_repr.equal
+  let equal = S.equal
 
-  let of_int_opt = Saturation_repr.of_int_opt
+  let of_int_opt = S.of_int_opt
 
   let fatally_saturated_int i =
     failwith (string_of_int i ^ " should not be saturated.")
@@ -82,7 +77,7 @@ module Arith = struct
     failwith (Z.to_string z ^ " should not be saturated.")
 
   let integral_of_int_exn i =
-    Saturation_repr.(
+    S.(
       match of_int_opt i with
       | None ->
           fatally_saturated_int i
@@ -97,28 +92,27 @@ module Arith = struct
     | exception Z.Overflow ->
         fatally_saturated_z z
 
-  let integral_to_z (i : integral) : Z.t =
-    Saturation_repr.(to_z (ediv i scaling_factor))
+  let integral_to_z (i : integral) : Z.t = S.(to_z (ediv i scaling_factor))
 
   let ceil x =
-    let r = Saturation_repr.erem x scaling_factor in
+    let r = S.erem x scaling_factor in
     if r = zero then x else add x (sub scaling_factor r)
 
-  let floor x = sub x (Saturation_repr.erem x scaling_factor)
+  let floor x = sub x (S.erem x scaling_factor)
 
   let fp x = x
 
   let pp fmtr fp =
-    let q = Saturation_repr.(ediv fp scaling_factor |> to_int) in
-    let r = Saturation_repr.(erem fp scaling_factor |> to_int) in
+    let q = S.(ediv fp scaling_factor |> to_int) in
+    let r = S.(erem fp scaling_factor |> to_int) in
     if Compare.Int.(r = 0) then Format.fprintf fmtr "%d" q
     else Format.fprintf fmtr "%d.%0*d" q decimals r
 
   let pp_integral = pp
 
-  let n_fp_encoding : fp Data_encoding.t = Saturation_repr.n_encoding
+  let n_fp_encoding : fp Data_encoding.t = S.n_encoding
 
-  let z_fp_encoding : fp Data_encoding.t = Saturation_repr.z_encoding
+  let z_fp_encoding : fp Data_encoding.t = S.z_encoding
 
   let n_integral_encoding : integral Data_encoding.t =
     Data_encoding.conv integral_to_z integral_exn Data_encoding.n
@@ -133,19 +127,12 @@ module Arith = struct
     | None ->
         fatally_saturated_z x
 
-  let safe_fp x =
-    match of_int_opt (Z.to_int x) with
-    | Some int ->
-        int
-    | None ->
-        Saturation_repr.saturated
-
-  let sub_opt = Saturation_repr.sub_opt
+  let sub_opt = S.sub_opt
 end
 
 type t = Unaccounted | Limited of {remaining : Arith.fp}
 
-type cost = Z.t
+type cost = S.may_saturate S.t
 
 let encoding =
   let open Data_encoding in
@@ -169,44 +156,53 @@ let pp ppf = function
   | Limited {remaining} ->
       Format.fprintf ppf "%a units remaining" Arith.pp remaining
 
-let cost_encoding = Data_encoding.z
+let cost_encoding = S.z_encoding
 
-let pp_cost fmt z = Z.pp_print fmt z
+let pp_cost fmt z = S.pp fmt z
 
-let allocation_weight = Z.of_int (scaling_factor * 2)
+let allocation_weight =
+  S.(mul_fast scaling_factor (S.mul_safe_of_int_exn 2)) |> S.mul_safe_exn
 
-let step_weight = Z.of_int scaling_factor
+let step_weight = scaling_factor
 
-let read_base_weight = Z.of_int (scaling_factor * 100)
+let read_base_weight =
+  S.(mul_fast scaling_factor (S.mul_safe_of_int_exn 100)) |> S.mul_safe_exn
 
-let write_base_weight = Z.of_int (scaling_factor * 160)
+let write_base_weight =
+  S.(mul_fast scaling_factor (S.mul_safe_of_int_exn 160)) |> S.mul_safe_exn
 
-let byte_read_weight = Z.of_int (scaling_factor * 10)
+let byte_read_weight =
+  S.(mul_fast scaling_factor (S.mul_safe_of_int_exn 10)) |> S.mul_safe_exn
 
-let byte_written_weight = Z.of_int (scaling_factor * 15)
+let byte_written_weight =
+  S.(mul_fast scaling_factor (S.mul_safe_of_int_exn 15)) |> S.mul_safe_exn
 
-let cost_to_milligas (cost : cost) : Arith.fp = Arith.safe_fp cost
+let cost_to_milligas (cost : cost) : Arith.fp = cost
 
 let raw_consume gas_counter cost =
   let gas = cost_to_milligas cost in
   Arith.sub_opt gas_counter gas
 
-let alloc_cost n = Z.mul allocation_weight (Z.succ n)
+let alloc_cost n =
+  S.scale_fast allocation_weight S.(add n (S.mul_safe_of_int_exn 1))
 
-let alloc_bytes_cost n = alloc_cost (Z.of_int ((n + 7) / 8))
+let alloc_bytes_cost n = alloc_cost (S.safe_int ((n + 7) / 8))
 
-let atomic_step_cost n = n
+let atomic_step_cost : 'a S.t -> cost = S.may_saturate
 
-let step_cost n = Z.mul step_weight n
+let step_cost n = S.scale_fast step_weight n
 
-let free = Z.zero
+let free = S.zero
 
-let read_bytes_cost n = Z.add read_base_weight (Z.mul byte_read_weight n)
+let read_bytes_cost n =
+  S.add read_base_weight (S.scale_fast byte_read_weight (S.safe_int n))
 
-let write_bytes_cost n = Z.add write_base_weight (Z.mul byte_written_weight n)
+let write_bytes_cost n =
+  S.add write_base_weight (S.scale_fast byte_written_weight (S.safe_int n))
 
-let ( +@ ) x y = Z.add x y
+let ( +@ ) x y = S.add x y
 
-let ( *@ ) x y = Z.mul x y
+let ( *@ ) x y = S.mul x y
 
-let alloc_mbytes_cost n = alloc_cost (Z.of_int 12) +@ alloc_bytes_cost n
+let alloc_mbytes_cost n =
+  alloc_cost (S.mul_safe_of_int_exn 12) +@ alloc_bytes_cost n

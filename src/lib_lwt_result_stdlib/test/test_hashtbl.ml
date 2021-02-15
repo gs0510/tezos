@@ -112,8 +112,12 @@ let test_self_clean _ _ =
   >>= fun _ ->
   IntLwtHashtbl.find_or_make t 5 (fun () -> Lwt.return (Error []))
   >>= fun _ ->
-  IntLwtHashtbl.find_or_make t 6 (fun () -> Lwt.fail Not_found)
-  >>= fun _ ->
+  Lwt.catch
+    (fun () ->
+      IntLwtHashtbl.find_or_make t 6 (fun () -> Lwt.fail Not_found)
+      >>= fun _ -> Assert.fail_msg "Not_found exception should propagate")
+    (function Not_found -> Lwt.return_unit | exn -> Lwt.fail exn)
+  >>= fun () ->
   let l = IntLwtHashtbl.length t in
   if not (l = 3) then Assert.fail "3" (Format.asprintf "%d" l) "length"
   else Lwt.return_unit
@@ -181,7 +185,7 @@ let tests =
   [ Alcotest_lwt.test_case "add_remove" `Quick test_add_remove;
     Alcotest_lwt.test_case "add_add" `Quick test_add_add;
     Alcotest_lwt.test_case "length" `Quick test_length;
-    Alcotest_lwt.test_case "self_clean" `Quick test_length;
+    Alcotest_lwt.test_case "self_clean" `Quick test_self_clean;
     Alcotest_lwt.test_case "order" `Quick test_order ]
 
 let () = Alcotest_lwt.run "hashtbl" [("hashtbl-lwt", tests)] |> Lwt_main.run

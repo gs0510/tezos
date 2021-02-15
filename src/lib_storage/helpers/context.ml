@@ -49,11 +49,17 @@ module Make_tree (Store : DB) = struct
   let add t k v = Store.Tree.add t k v
 
   let kind t =
+    match Store.Tree.destruct t with `Contents _ -> `Value | `Node _ -> `Tree
+
+  let to_value t =
     match Store.Tree.destruct t with
     | `Contents (c, _) ->
-        `Value c
+      Store.Tree.Contents.force_exn c >>= fun c ->
+      Lwt.return (Some c)
     | `Node _ ->
-        `Tree
+        Lwt.return_none
+
+  let of_value _ v = Store.Tree.add Store.Tree.empty [] v
 
   let fold ?depth t k ~init ~f =
     find_tree t k

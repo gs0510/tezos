@@ -24,11 +24,6 @@
 (*                                                                           *)
 (*****************************************************************************)
 
-let () =
-  Prevalidator_filters.register (module Tezos_mempool_007_PsDELPH1.Filter) ;
-  Prevalidator_filters.register (module Tezos_mempool_008_PtEdoTez.Filter) ;
-  ()
-
 (** Commands *)
 
 let show (args : Node_shared_arg.t) =

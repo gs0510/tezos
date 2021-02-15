@@ -27,6 +27,7 @@
    v2/time.mli
    v2/option.mli
    v2/tzEndian.mli
+   v2/bits.mli
 
    v2/RPC_arg.mli
    v2/RPC_path.mli
@@ -64,7 +65,7 @@
    v2/context.mli
    v2/updater.mli
    v2/RPC_context.mli
-
+   v2/equality_witness.mli
  )
  (action (with-stdout-to %{targets} (chdir %{workspace_root}}
           (run %{libexec:tezos-protocol-environment-packer:s_packer} "sigs" %{deps})))))

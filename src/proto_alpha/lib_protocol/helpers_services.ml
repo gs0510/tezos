@@ -27,6 +27,8 @@ open Alpha_context
 
 type error += Cannot_parse_operation (* `Branch *)
 
+type error += Cannot_serialize_log
+
 let () =
   register_error_kind
     `Branch
@@ -36,7 +38,18 @@ let () =
     ~pp:(fun ppf () -> Format.fprintf ppf "The operation cannot be parsed")
     Data_encoding.unit
     (function Cannot_parse_operation -> Some () | _ -> None)
-    (fun () -> Cannot_parse_operation)
+    (fun () -> Cannot_parse_operation) ;
+  (* Cannot serialize log *)
+  register_error_kind
+    `Temporary
+    ~id:"michelson_v1.cannot_serialize_log"
+    ~title:"Not enough gas to serialize execution trace"
+    ~description:
+      "Execution trace with stacks was to big to be serialized with the \
+       provided gas"
+    Data_encoding.empty
+    (function Cannot_serialize_log -> Some () | _ -> None)
+    (fun () -> Cannot_serialize_log)
 
 let parse_operation (op : Operation.raw) =
   match
@@ -55,18 +68,46 @@ module Scripts = struct
 
     let path = RPC_path.(path / "scripts")
 
+    let unparsing_mode_encoding =
+      let open Script_ir_translator in
+      union
+        ~tag_size:`Uint8
+        [ case
+            (Tag 0)
+            ~title:"Readable"
+            (constant "Readable")
+            (function
+              | Readable -> Some () | Optimized | Optimized_legacy -> None)
+            (fun () -> Readable);
+          case
+            (Tag 1)
+            ~title:"Optimized"
+            (constant "Optimized")
+            (function
+              | Optimized -> Some () | Readable | Optimized_legacy -> None)
+            (fun () -> Optimized);
+          case
+            (Tag 2)
+            ~title:"Optimized_legacy"
+            (constant "Optimized_legacy")
+            (function
+              | Optimized_legacy -> Some () | Readable | Optimized -> None)
+            (fun () -> Optimized_legacy) ]
+
     let run_code_input_encoding =
-      obj10
-        (req "script" Script.expr_encoding)
-        (req "storage" Script.expr_encoding)
-        (req "input" Script.expr_encoding)
-        (req "amount" Tez.encoding)
-        (req "balance" Tez.encoding)
-        (req "chain_id" Chain_id.encoding)
-        (opt "source" Contract.encoding)
-        (opt "payer" Contract.encoding)
-        (opt "gas" Gas.Arith.z_integral_encoding)
-        (dft "entrypoint" string "default")
+      merge_objs
+        (obj10
+           (req "script" Script.expr_encoding)
+           (req "storage" Script.expr_encoding)
+           (req "input" Script.expr_encoding)
+           (req "amount" Tez.encoding)
+           (req "balance" Tez.encoding)
+           (req "chain_id" Chain_id.encoding)
+           (opt "source" Contract.encoding)
+           (opt "payer" Contract.encoding)
+           (opt "gas" Gas.Arith.z_integral_encoding)
+           (dft "entrypoint" string "default"))
+        (obj1 (opt "unparsing_mode" unparsing_mode_encoding))
 
     let trace_encoding =
       def "scripted.trace" @@ list
@@ -92,7 +133,7 @@ module Scripts = struct
                     legacy_lazy_storage_diff,
                     lazy_storage_diff ) ->
                let lazy_storage_diff =
-                 Option.first_some lazy_storage_diff legacy_lazy_storage_diff
+                 Option.either lazy_storage_diff legacy_lazy_storage_diff
                in
                (storage, operations, lazy_storage_diff))
              (obj4
@@ -122,7 +163,7 @@ module Scripts = struct
                     legacy_lazy_storage_diff,
                     lazy_storage_diff ) ->
                let lazy_storage_diff =
-                 Option.first_some lazy_storage_diff legacy_lazy_storage_diff
+                 Option.either lazy_storage_diff legacy_lazy_storage_diff
                in
                (storage, operations, trace, lazy_storage_diff))
              (obj5
@@ -177,6 +218,32 @@ module Scripts = struct
         ~query:RPC_query.empty
         RPC_path.(path / "pack_data")
 
+    let normalize_data =
+      RPC_service.post_service
+        ~description:
+          "Normalizes some data expression using the requested unparsing mode"
+        ~input:
+          (obj4
+             (req "data" Script.expr_encoding)
+             (req "type" Script.expr_encoding)
+             (req "unparsing_mode" unparsing_mode_encoding)
+             (opt "legacy" bool))
+        ~output:(obj1 (req "normalized" Script.expr_encoding))
+        ~query:RPC_query.empty
+        RPC_path.(path / "normalize_data")
+
+    let normalize_script =
+      RPC_service.post_service
+        ~description:
+          "Normalizes a Michelson script using the requested unparsing mode"
+        ~input:
+          (obj2
+             (req "script" Script.expr_encoding)
+             (req "unparsing_mode" unparsing_mode_encoding))
+        ~output:(obj1 (req "normalized" Script.expr_encoding))
+        ~query:RPC_query.empty
+        RPC_path.(path / "normalize_script")
+
     let run_operation =
       RPC_service.post_service
         ~description:"Run an operation without signature checks"
@@ -219,22 +286,11 @@ module Scripts = struct
         RPC_path.(path / "entrypoints")
   end
 
-  module Traced_interpreter = struct
-    type error += Cannot_serialize_log
+  module type UNPARSING_MODE = sig
+    val unparsing_mode : Script_ir_translator.unparsing_mode
+  end
 
-    let () =
-      (* Cannot serialize log *)
-      register_error_kind
-        `Temporary
-        ~id:"michelson_v1.cannot_serialize_log"
-        ~title:"Not enough gas to serialize execution trace"
-        ~description:
-          "Execution trace with stacks was to big to be serialized with the \
-           provided gas"
-        Data_encoding.empty
-        (function Cannot_serialize_log -> Some () | _ -> None)
-        (fun () -> Cannot_serialize_log)
-
+  module Traced_interpreter (Unparsing_mode : UNPARSING_MODE) = struct
     type log_element =
       | Log :
           context * Script.location * 'a * 'a Script_typed_ir.stack_ty
@@ -250,7 +306,11 @@ module Scripts = struct
         | (Empty_t, ()) ->
             return_nil
         | (Item_t (ty, rest_ty, annot), (v, rest)) ->
-            Script_ir_translator.unparse_data ctxt Readable ty v
+            Script_ir_translator.unparse_data
+              ctxt
+              Unparsing_mode.unparsing_mode
+              ty
+              v
             >>=? fun (data, _ctxt) ->
             unparse_stack (rest_ty, rest)
             >|=? fun rest ->
@@ -288,14 +348,14 @@ module Scripts = struct
         >>=? fun res -> return (Some (List.rev res))
     end
 
-    let execute ctxt mode step_constants ~script ~entrypoint ~parameter =
+    let execute ctxt step_constants ~script ~entrypoint ~parameter =
       let module Logger = Trace_logger () in
       let open Script_interpreter in
       let logger = (module Logger : STEP_LOGGER) in
       execute
         ~logger
         ctxt
-        mode
+        Unparsing_mode.unparsing_mode
         step_constants
         ~script
         ~entrypoint
@@ -357,17 +417,19 @@ module Scripts = struct
       S.run_code
       (fun ctxt
            ()
-           ( code,
-             storage,
-             parameter,
-             amount,
-             balance,
-             chain_id,
-             source,
-             payer,
-             gas,
-             entrypoint )
+           ( ( code,
+               storage,
+               parameter,
+               amount,
+               balance,
+               chain_id,
+               source,
+               payer,
+               gas,
+               entrypoint ),
+             unparsing_mode )
            ->
+        let unparsing_mode = Option.value ~default:Readable unparsing_mode in
         let storage = Script.lazy_expr storage in
         let code = Script.lazy_expr code in
         originate_dummy_contract ctxt {storage; code} balance
@@ -397,7 +459,7 @@ module Scripts = struct
         in
         Script_interpreter.execute
           ctxt
-          Readable
+          unparsing_mode
           step_constants
           ~script:{storage; code}
           ~entrypoint
@@ -409,17 +471,19 @@ module Scripts = struct
       S.trace_code
       (fun ctxt
            ()
-           ( code,
-             storage,
-             parameter,
-             amount,
-             balance,
-             chain_id,
-             source,
-             payer,
-             gas,
-             entrypoint )
+           ( ( code,
+               storage,
+               parameter,
+               amount,
+               balance,
+               chain_id,
+               source,
+               payer,
+               gas,
+               entrypoint ),
+             unparsing_mode )
            ->
+        let unparsing_mode = Option.value ~default:Readable unparsing_mode in
         let storage = Script.lazy_expr storage in
         let code = Script.lazy_expr code in
         originate_dummy_contract ctxt {storage; code} balance
@@ -447,9 +511,12 @@ module Scripts = struct
           let open Script_interpreter in
           {source; payer; self = dummy_contract; amount; chain_id}
         in
-        Traced_interpreter.execute
+        let module Unparsing_mode = struct
+          let unparsing_mode = unparsing_mode
+        end in
+        let module Interp = Traced_interpreter (Unparsing_mode) in
+        Interp.execute
           ctxt
-          Readable
           step_constants
           ~script:{storage; code}
           ~entrypoint
@@ -501,6 +568,25 @@ module Scripts = struct
         >>=? fun (data, ctxt) ->
         Script_ir_translator.pack_data ctxt typ data
         >|=? fun (bytes, ctxt) -> (bytes, Gas.level ctxt)) ;
+    register0
+      S.normalize_data
+      (fun ctxt () (expr, typ, unparsing_mode, legacy) ->
+        let open Script_ir_translator in
+        let legacy = Option.value ~default:false legacy in
+        let ctxt = Gas.set_unlimited ctxt in
+        Script_ir_translator.parse_any_ty ctxt ~legacy (Micheline.root typ)
+        >>?= fun (Ex_ty typ, ctxt) ->
+        parse_data ctxt ~legacy ~allow_forged:true typ (Micheline.root expr)
+        >>=? fun (data, ctxt) ->
+        Script_ir_translator.unparse_data ctxt unparsing_mode typ data
+        >|=? fun (normalized, _ctxt) -> Micheline.strip_locations normalized) ;
+    register0 S.normalize_script (fun ctxt () (script, unparsing_mode) ->
+        let ctxt = Gas.set_unlimited ctxt in
+        Script_ir_translator.unparse_code
+          ctxt
+          unparsing_mode
+          (Micheline.root script)
+        >|=? fun (normalized, _ctxt) -> Micheline.strip_locations normalized) ;
     register0
       S.run_operation
       (fun ctxt
@@ -666,41 +752,43 @@ module Scripts = struct
               map
               [] ) ))
 
-  let run_code ctxt block ?gas ?(entrypoint = "default") ~script ~storage
-      ~input ~amount ~balance ~chain_id ~source ~payer =
+  let run_code ctxt block ?unparsing_mode ?gas ?(entrypoint = "default")
+      ~script ~storage ~input ~amount ~balance ~chain_id ~source ~payer =
     RPC_context.make_call0
       S.run_code
       ctxt
       block
       ()
-      ( script,
-        storage,
-        input,
-        amount,
-        balance,
-        chain_id,
-        source,
-        payer,
-        gas,
-        entrypoint )
+      ( ( script,
+          storage,
+          input,
+          amount,
+          balance,
+          chain_id,
+          source,
+          payer,
+          gas,
+          entrypoint ),
+        unparsing_mode )
 
-  let trace_code ctxt block ?gas ?(entrypoint = "default") ~script ~storage
-      ~input ~amount ~balance ~chain_id ~source ~payer =
+  let trace_code ctxt block ?unparsing_mode ?gas ?(entrypoint = "default")
+      ~script ~storage ~input ~amount ~balance ~chain_id ~source ~payer =
     RPC_context.make_call0
       S.trace_code
       ctxt
       block
       ()
-      ( script,
-        storage,
-        input,
-        amount,
-        balance,
-        chain_id,
-        source,
-        payer,
-        gas,
-        entrypoint )
+      ( ( script,
+          storage,
+          input,
+          amount,
+          balance,
+          chain_id,
+          source,
+          payer,
+          gas,
+          entrypoint ),
+        unparsing_mode )
 
   let typecheck_code ctxt block ?gas ?legacy ~script =
     RPC_context.make_call0 S.typecheck_code ctxt block () (script, gas, legacy)
@@ -715,6 +803,22 @@ module Scripts = struct
 
   let pack_data ctxt block ?gas ~data ~ty =
     RPC_context.make_call0 S.pack_data ctxt block () (data, ty, gas)
+
+  let normalize_data ctxt block ?legacy ~data ~ty ~unparsing_mode =
+    RPC_context.make_call0
+      S.normalize_data
+      ctxt
+      block
+      ()
+      (data, ty, unparsing_mode, legacy)
+
+  let normalize_script ctxt block ~script ~unparsing_mode =
+    RPC_context.make_call0
+      S.normalize_script
+      ctxt
+      block
+      ()
+      (script, unparsing_mode)
 
   let run_operation ctxt block ~op ~chain_id =
     RPC_context.make_call0 S.run_operation ctxt block () (op, chain_id)
@@ -909,14 +1013,17 @@ module Forge = struct
   let ballot ctxt b ~branch ~source ~period ~proposal ~ballot () =
     operation ctxt b ~branch (Ballot {source; period; proposal; ballot})
 
+  let failing_noop ctxt b ~branch ~message () =
+    operation ctxt b ~branch (Failing_noop message)
+
   let seed_nonce_revelation ctxt block ~branch ~level ~nonce () =
     operation ctxt block ~branch (Seed_nonce_revelation {level; nonce})
 
   let double_baking_evidence ctxt block ~branch ~bh1 ~bh2 () =
     operation ctxt block ~branch (Double_baking_evidence {bh1; bh2})
 
-  let double_endorsement_evidence ctxt block ~branch ~op1 ~op2 () =
-    operation ctxt block ~branch (Double_endorsement_evidence {op1; op2})
+  let double_endorsement_evidence ctxt block ~branch ~op1 ~op2 ~slot () =
+    operation ctxt block ~branch (Double_endorsement_evidence {op1; op2; slot})
 
   let empty_proof_of_work_nonce =
     Bytes.make Constants_repr.proof_of_work_nonce_size '\000'

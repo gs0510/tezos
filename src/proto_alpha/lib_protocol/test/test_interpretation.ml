@@ -13,7 +13,10 @@ open Script_interpreter
 let ( >>=?? ) x y =
   x
   >>= function
-  | Ok s -> y s | Error _ as err -> Lwt.return @@ Environment.wrap_error err
+  | Ok s ->
+      y s
+  | Error err ->
+      Lwt.return @@ Error (Environment.wrap_tztrace err)
 
 let test_context () =
   Context.init 3
@@ -166,8 +169,7 @@ let error_encoding_tests =
       ( "Runtime_contract_error",
         Runtime_contract_error (contract_zero, script_expr_int) );
       ("Bad_contract_parameter", Bad_contract_parameter contract_zero);
-      ( "Cannot_serialize_log",
-        Helpers_services.Scripts.Traced_interpreter.Cannot_serialize_log );
+      ("Cannot_serialize_log", Helpers_services.Cannot_serialize_log);
       ("Cannot_serialize_failure", Cannot_serialize_failure);
       ("Cannot_serialize_storage", Cannot_serialize_storage) ]
 

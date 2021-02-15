@@ -34,6 +34,9 @@ type mode = Client of Node.t option | Mockup | Proxy of Node.t
     - [Synchronous] is the default mode (no flag passed to [create mockup]). *)
 type mockup_sync_mode = Asynchronous | Synchronous
 
+(** The mode argument of the client's 'normalize data' command *)
+type normalize_mode = Readable | Optimized | Optimized_legacy
+
 (** Tezos client states. *)
 type t
 
@@ -97,6 +100,11 @@ type query_string = (string * string) list
 (** HTTP methods for RPCs. *)
 type meth = GET | PUT | POST | PATCH
 
+(** [rpc_path_query_to_string ["key1", "value1"; "key2", "value2")] ["seg1"; "seg2"]]
+    returns [/seg1/seg2?key1=value1&key2=value2] where seg1, seg2, key1, key2,
+    value1, and value2 have been appropriately encoded *)
+val rpc_path_query_to_string : ?query_string:query_string -> path -> string
+
 (** Use the client to call an RPC.
 
     Run [tezos-client rpc meth path?query_string with data].
@@ -115,6 +123,7 @@ val rpc :
 val spawn_rpc :
   ?node:Node.t ->
   ?hooks:Process.hooks ->
+  ?env:string String_map.t ->
   ?data:JSON.u ->
   ?query_string:query_string ->
   meth ->
@@ -328,6 +337,24 @@ val spawn_originate_contract :
   amount:Tez.t ->
   src:string ->
   prg:string ->
+  t ->
+  Process.t
+
+(** Run [tezos-client normalize data .. of type ...]*)
+val normalize_data :
+  ?mode:normalize_mode ->
+  ?legacy:bool ->
+  data:string ->
+  typ:string ->
+  t ->
+  string Lwt.t
+
+(** Same as [normalize_data], but do not wait for the process to exit. *)
+val spawn_normalize_data :
+  ?mode:normalize_mode ->
+  ?legacy:bool ->
+  data:string ->
+  typ:string ->
   t ->
   Process.t
 

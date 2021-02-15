@@ -414,9 +414,29 @@ class Client:
     def pack(self, data: str, typ: str) -> str:
         return self.hash(data, typ).packed
 
-    def sign(self, data: str, identity: str) -> str:
-        cmd = ['sign', 'bytes', data, 'for', identity]
-        return client_output.SignatureResult(self.run(cmd)).sig
+    def normalize(
+        self, data: str, typ: str, mode: str = None, legacy: bool = False
+    ) -> str:
+        cmd = ['normalize', 'data', data, 'of', 'type', typ]
+        if mode is not None:
+            cmd += ['--unparsing-mode', mode]
+        if legacy:
+            cmd += ['--legacy']
+        return self.run(cmd)
+
+    def normalize_script(
+        self, script: str, mode: str = None, file: bool = True
+    ) -> str:
+        if file:
+            assert os.path.isfile(script), f'{script} is not a file'
+        cmd = ['normalize', 'script', script]
+        if mode is not None:
+            cmd += ['--unparsing-mode', mode]
+        return self.run(cmd)
+
+    def normalize_type(self, typ: str) -> str:
+        cmd = ['normalize', 'type', typ]
+        return self.run(cmd)
 
     def activate_account(self, manager: str, contract: str):
         cmd = ['activate', 'account', manager, 'with', contract]
@@ -424,6 +444,28 @@ class Client:
 
     def cmd_batch(self, source: str, json_ops: str) -> List[str]:
         return ['multiple', 'transfers', 'from', source, 'using', json_ops]
+
+    def sign_message(self, data: str, identity: str, block=None) -> str:
+        cmd = ['sign', 'message', data, 'for', identity]
+        if block is not None:
+            cmd += ["--block", block]
+        return client_output.SignMessageResult(self.run(cmd)).signature
+
+    def check_message(self, data: str, identity: str, signature: str) -> bool:
+        cmd = [
+            'check',
+            'that',
+            'message',
+            data,
+            'was',
+            'signed',
+            'by',
+            identity,
+            'to',
+            'produce',
+            signature,
+        ]
+        return client_output.CheckSignMessageResult(self.run(cmd)).check
 
     def transfer(
         self,
@@ -526,15 +568,26 @@ class Client:
         res = self.run(['get', 'timestamp'])
         return res[:-1]
 
+    def get_block_timestamp(
+        self, params: List[str] = None, chain: str = 'main', block: str = 'head'
+    ) -> datetime.datetime:
+        assert chain in {'main', 'test'}
+        rpc_res = self.rpc(
+            'get', f'/chains/{chain}/blocks/{block}/header/shell', params=params
+        )
+        timestamp = rpc_res['timestamp']
+
+        rfc3399_format = "%Y-%m-%dT%H:%M:%SZ"
+        timestamp_date = datetime.datetime.strptime(timestamp, rfc3399_format)
+        timestamp_date = timestamp_date.replace(tzinfo=datetime.timezone.utc)
+
+        return timestamp_date
+
     def get_now(self) -> str:
         """Returns the timestamp of next-to-last block,
         offset by time_between_blocks"""
-        rfc3399_format = "%Y-%m-%dT%H:%M:%SZ"
-        timestamp = self.rpc('get', '/chains/main/blocks/head~1/header')[
-            'timestamp'
-        ]
-        timestamp_date = datetime.datetime.strptime(timestamp, rfc3399_format)
-        timestamp_date = timestamp_date.replace(tzinfo=datetime.timezone.utc)
+
+        timestamp_date = self.get_block_timestamp(block='head~1')
 
         constants = self.rpc(
             'get', '/chains/main/blocks/head/context/constants'
@@ -545,6 +598,7 @@ class Client:
 
         now_date = timestamp_date + delta
 
+        rfc3399_format = "%Y-%m-%dT%H:%M:%SZ"
         return now_date.strftime(rfc3399_format)
 
     def get_receipt(
@@ -579,6 +633,9 @@ class Client:
 
     def get_head(self) -> dict:
         return self.rpc('get', '/chains/main/blocks/head')
+
+    def get_header(self, block='head') -> dict:
+        return self.rpc('get', f'/chains/main/blocks/{block}/header')
 
     def get_block(self, block_hash) -> dict:
         return self.rpc('get', f'/chains/main/blocks/{block_hash}')
@@ -867,11 +924,12 @@ class Client:
         res = self.run(cmd)
         return res[:-1]
 
-    def sign_bytes(
-        self, to_sign: bytes, key: str
-    ) -> client_output.SignBytesResult:
-        cmd = ['sign', 'bytes', str(to_sign), 'for', key]
-        return client_output.SignBytesResult(self.run(cmd))
+    def sign_bytes_of_string(self, data: str, identity: str) -> str:
+        cmd = ['sign', 'bytes', data, 'for', identity]
+        return client_output.SignBytesResult(self.run(cmd)).signature
+
+    def sign_bytes(self, to_sign: bytes, key: str) -> str:
+        return self.sign_bytes_of_string(str(to_sign), key)
 
     def msig_prepare_transfer(
         self, msig_name: str, amount: float, dest: str, args: List[str] = None

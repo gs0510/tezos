@@ -70,7 +70,7 @@ val may_saturate : _ t -> may_saturate t
 val to_int : 'a t -> int
 
 (** 0 *)
-val zero : mul_safe t
+val zero : _ t
 
 (** 2^62 - 1 *)
 val saturated : may_saturate t
@@ -96,13 +96,18 @@ val max : 'a t -> 'a t -> 'a t
 
 val compare : 'a t -> 'b t -> int
 
+(** [shift_right x y] behaves like a logical shift of [x] by [y] bits
+   to the right. [y] must be between 0 and 63. *)
+val shift_right : 'a t -> int -> 'a t
+
 (** [mul x y] behaves like multiplication between native integers as
    long as its result stay below [saturated]. Otherwise, [mul] returns
    [saturated]. *)
 val mul : _ t -> _ t -> may_saturate t
 
 (** [mul_safe x] returns a [mul_safe t] only if [x] does not trigger
-    overflows when multiplied with another [mul_safe t]. *)
+    overflows when multiplied with another [mul_safe t]. More precisely,
+    [x] is safe for fast multiplications if [x < 2147483648]. *)
 val mul_safe : _ t -> mul_safe t option
 
 (** [mul_fast x y] exploits the fact that [x] and [y] are known not to
@@ -149,6 +154,27 @@ val of_int_opt : int -> may_saturate t option
 (** [of_z_opt x] returns [Some x] if [x >= 0] and [x < saturated],
     and [None] otherwise. *)
 val of_z_opt : Z.t -> may_saturate t option
+
+(** When a saturated integer is sufficiently small (i.e. strictly less
+   than 2147483648), we can assign it the type [mul_safe S.t] to use
+   it within fast multiplications, named [S.scale_fast] and
+   [S.mul_fast].
+
+   The following function allows such type assignment but may raise an
+   exception if the assumption is wrong.  Therefore, [mul_safe_exn]
+   should only be used to define toplevel values, so that these
+   exceptions can only occur during startup.
+ *)
+val mul_safe_exn : may_saturate t -> mul_safe t
+
+(** [mul_safe_of_int_exn x] is the composition of [of_int_opt] and
+   [mul_safe] in the option monad. This function raises [Invalid_argument]
+   if [x] is not safe. This function should be used on integer literals
+   that are obviously [mul_safe]. *)
+val mul_safe_of_int_exn : int -> mul_safe t
+
+(** [safe_int x] is [of_int_opt x |> saturate_if_undef]. *)
+val safe_int : int -> may_saturate t
 
 (** [to_z z] is [Z.of_int]. *)
 val to_z : _ t -> Z.t

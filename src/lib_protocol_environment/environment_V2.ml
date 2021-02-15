@@ -2,7 +2,7 @@
 (*                                                                           *)
 (* Open Source License                                                       *)
 (* Copyright (c) 2018 Dynamic Ledger Solutions, Inc. <contact@tezos.com>     *)
-(* Copyright (c) 2018 Nomadic Labs. <contact@nomadic-labs.com>               *)
+(* Copyright (c) 2020 Nomadic Labs. <contact@nomadic-labs.com>               *)
 (* Copyright (c) 2020 Metastate AG <hello@metastate.dev>                     *)
 (*                                                                           *)
 (* Permission is hereby granted, free of charge, to any person obtaining a   *)
@@ -77,14 +77,18 @@ module type V2 = sig
        and type RPC_service.meth = RPC_service.meth
        and type (+'m, 'pr, 'p, 'q, 'i, 'o) RPC_service.t =
             ('m, 'pr, 'p, 'q, 'i, 'o) RPC_service.t
-       and type Error_monad.shell_error = Error_monad.error
-       and type 'shell_error Error_monad.shell_trace =
-            'shell_error Error_monad.trace
+       and type Error_monad.shell_tztrace = Error_monad.tztrace
+       and type 'a Error_monad.shell_tzresult =
+            ('a, Error_monad.tztrace) result
        and module Sapling = Tezos_sapling.Core.Validator
 
   type error += Ecoproto_error of Error_monad.error
 
-  val wrap_error : 'a Error_monad.tzresult -> 'a tzresult
+  val wrap_tzerror : Error_monad.error -> error
+
+  val wrap_tztrace : Error_monad.error Error_monad.trace -> error trace
+
+  val wrap_tzresult : 'a Error_monad.tzresult -> 'a tzresult
 
   module Lift (P : Updater.PROTOCOL) :
     PROTOCOL
@@ -126,6 +130,7 @@ struct
   module Bytes = Bytes
   module Hex = Hex
   module String = String
+  module Bits = Bits
   module TzEndian = TzEndian
   module Set = Stdlib.Set
   module Map = Stdlib.Map
@@ -133,7 +138,7 @@ struct
   module Int64 = Int64
   module Buffer = Buffer
   module Format = Format
-  module Option = Option
+  module Option = Tezos_lwt_result_stdlib.Lwtreslib.Option
 
   module Raw_hashes = struct
     let sha256 = Hacl.Hash.SHA256.digest
@@ -717,11 +722,9 @@ struct
   end
 
   module Error_monad = struct
-    type 'a shell_tzresult = 'a Error_monad.tzresult
+    type shell_tztrace = Error_monad.tztrace
 
-    type shell_error = Error_monad.error = ..
-
-    type 'shell_error shell_trace = 'shell_error Error_monad.trace
+    type 'a shell_tzresult = ('a, Error_monad.tztrace) result
 
     type error_category = [`Branch | `Temporary | `Permanent]
 
@@ -747,11 +750,11 @@ struct
       ~title:("Error returned by protocol " ^ Param.name)
       ~description:("Wrapped error for economic protocol " ^ Param.name ^ ".")
 
-  let wrap_error = function
-    | Ok _ as ok ->
-        ok
-    | Error errors ->
-        Error (List.map (fun error -> Ecoproto_error error) errors)
+  let wrap_tzerror error = Ecoproto_error error
+
+  let wrap_tztrace t = List.map wrap_tzerror t
+
+  let wrap_tzresult r = Result.map_error wrap_tztrace r
 
   module Chain_id = Chain_id
   module Block_hash = Block_hash
@@ -1081,7 +1084,7 @@ struct
         ~predecessor_timestamp
         ~predecessor_fitness
         raw_block
-      >|= wrap_error
+      >|= wrap_tzresult
 
     let begin_application ~chain_id ~predecessor_context ~predecessor_timestamp
         ~predecessor_fitness raw_block =
@@ -1091,7 +1094,7 @@ struct
         ~predecessor_timestamp
         ~predecessor_fitness
         raw_block
-      >|= wrap_error
+      >|= wrap_tzresult
 
     let begin_construction ~chain_id ~predecessor_context
         ~predecessor_timestamp ~predecessor_level ~predecessor_fitness
@@ -1106,15 +1109,15 @@ struct
         ~timestamp
         ?protocol_data
         ()
-      >|= wrap_error
+      >|= wrap_tzresult
 
-    let current_context c = current_context c >|= wrap_error
+    let current_context c = current_context c >|= wrap_tzresult
 
-    let apply_operation c o = apply_operation c o >|= wrap_error
+    let apply_operation c o = apply_operation c o >|= wrap_tzresult
 
-    let finalize_block c = finalize_block c >|= wrap_error
+    let finalize_block c = finalize_block c >|= wrap_tzresult
 
-    let init c bh = init c bh >|= wrap_error
+    let init c bh = init c bh >|= wrap_tzresult
 
     let environment_version = Protocol.V2
   end
@@ -1240,4 +1243,6 @@ struct
           let rpc_context = conv block in
           lookup#call_service s (((rpc_context, a1), a2), a3) q i
     end
+
+  module Equality_witness = Environment_context.Equality_witness
 end

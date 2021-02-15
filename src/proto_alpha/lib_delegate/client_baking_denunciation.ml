@@ -66,10 +66,11 @@ let create_state ~preserved_levels =
 (* We choose a previous offset (5 blocks from head) to ensure that the
    injected operation is branched from a valid predecessor. *)
 let get_block_offset level =
-  match Environment.wrap_error (Raw_level.of_int32 5l) with
+  match Raw_level.of_int32 5l with
   | Ok min_level ->
       Lwt.return (if Raw_level.(level < min_level) then `Head 0 else `Head 5)
   | Error errs ->
+      let errs = Environment.wrap_tztrace errs in
       lwt_log_error
         Tag.DSL.(
           fun f ->
@@ -86,12 +87,24 @@ let process_endorsements (cctxt : #Protocol_client_context.full) state
       let chain = `Hash chain_id in
       match (protocol_data, receipt) with
       | ( Operation_data
-            ({contents = Single (Endorsement _); _} as protocol_data),
+            { contents =
+                Single
+                  (Endorsement_with_slot
+                    { endorsement =
+                        { protocol_data =
+                            {contents = Single (Endorsement _); _} as
+                            protocol_data;
+                          _ };
+                      _ });
+              _ },
           Some
             Apply_results.(
               Operation_metadata
-                {contents = Single_result (Endorsement_result {delegate; _})})
-        ) -> (
+                { contents =
+                    Single_result
+                      (Endorsement_with_slot_result
+                        (Endorsement_result {delegate; slots = slot :: _; _}))
+                }) ) -> (
           let new_endorsement : Kind.endorsement Alpha_context.operation =
             {shell; protocol_data}
           in
@@ -122,6 +135,7 @@ let process_endorsements (cctxt : #Protocol_client_context.full) state
                 ~branch:block_hash
                 ~op1:existing_endorsement
                 ~op2:new_endorsement
+                ~slot
                 ()
               >>=? fun bytes ->
               let bytes = Signature.concat bytes Signature.zero in

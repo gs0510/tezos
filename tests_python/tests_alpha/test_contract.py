@@ -690,7 +690,7 @@ class TestChainId:
             'pair (pair chain_id address)'
             + '(pair (lambda unit (list operation)) nat)',
         )
-        signature = client.sign(packed, "bootstrap1")
+        signature = client.sign_bytes_of_string(packed, "bootstrap1")
         client.call(
             'bootstrap2',
             'authentication',
@@ -1199,8 +1199,8 @@ class TestComparables:
     def test_comparable_signature(self, client):
         client.typecheck_data('{}', '(set signature)')
         packed = client.pack('Unit', 'unit')
-        sig1 = client.sign(packed, "bootstrap1")
-        sig2 = client.sign(packed, "bootstrap2")
+        sig1 = client.sign_bytes_of_string(packed, "bootstrap1")
+        sig2 = client.sign_bytes_of_string(packed, "bootstrap2")
         utils.assert_typecheck_data_failure(
             client,
             '{"' + f'{sig1}' + '"; "' + f'{sig2}' + '"}',
@@ -1370,3 +1370,35 @@ class TestSelfAddressTransfer:
             ['--arg', f'"{receiver_address}"', '--burn-cap', '2'],
         )
         client.bake('bootstrap5', BAKE_ARGS)
+
+
+@pytest.mark.contract
+@pytest.mark.regression
+class TestNormalize:
+    """Regression tests for the "normalize data" command."""
+
+    modes = [None, 'Readable', 'Optimized', 'Optimized_legacy']
+
+    @pytest.mark.parametrize('mode', modes)
+    def test_normalize_unparsing_mode(self, client_regtest_scrubbed, mode):
+        client = client_regtest_scrubbed
+        input_data = (
+            '{Pair 0 3 6 9; Pair 1 (Pair 4 (Pair 7 10)); {2; 5; 8; 11}}'
+        )
+        input_type = 'list (pair nat nat nat nat)'
+        client.normalize(input_data, input_type, mode=mode)
+
+    def test_normalize_legacy_flag(self, client_regtest_scrubbed):
+        client = client_regtest_scrubbed
+        input_data = '{Elt %a 0 1}'
+        input_type = 'map nat nat'
+        client.normalize(input_data, input_type, legacy=True)
+        error_pattern = 'unexpected annotation.'
+        with utils.assert_run_failure(error_pattern):
+            client.normalize(input_data, input_type, legacy=False)
+
+    @pytest.mark.parametrize('mode', modes)
+    def test_normalize_script(self, client_regtest_scrubbed, mode):
+        client = client_regtest_scrubbed
+        path = os.path.join(CONTRACT_PATH, 'opcodes', 'comb-literals.tz')
+        client.normalize_script(path, mode=mode)

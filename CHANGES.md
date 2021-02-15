@@ -1,18 +1,26 @@
+
+This file lists the changes added to each version of tezos-node,
+tezos-client, and the other Tezos binaries. The changes to the Tezos
+protocol are documented in the `docs/protocols/` directory; in
+particular in `docs/protocols/alpha.rst`.
+
 # Development Version
 
-When you make a commit on master, you can add an item in one of the following
-subsections (node, client, ...) to document your commit or the set of related commits.
-This will ensure that this change is not forgotten in the final changelog.
-By having your commits update this file you also make it easy
-to find the commits which are related to your changes using `git blame`.
+When you make a commit on master, you can add an item in one of the
+following subsections (node, client, ...) to document your commit or
+the set of related commits. This will ensure that this change is not
+forgotten in the final changelog.  By having your commits update this
+file you also make it easy to find the commits which are related to
+your changes using `git blame`.
 
 Only describe changes which affect users (bug fixes and new features),
-not refactorings or tests. Changes to the documentation do not need to be documented
-here either.
+not refactorings or tests. Changes to the documentation do not need to
+be documented here either.
 
 ## Node
 
 - Cap the number of expected connections to `100` on the command line
+  interface.
 
 - Fixes a bug that launched the prevalidator when the node was not
   bootstrapped.
@@ -20,8 +28,8 @@ here either.
 - Enforce loading of non-embedded protocols before starting the node
   allowing the prevalidator to start correctly.
 
-- Optimized the I/O and CPU usage by removing an unnecessary access to
-  the context during block validation.
+- Optimize I/O and CPU usage by removing an unnecessary access to the
+  context during block validation.
 
 - Fixes a bug where any event would allocate more memory than needed
   when it were not to be printed.
@@ -39,6 +47,11 @@ here either.
 - Add `--version` flag
 
 - Fixed commands `--mode mockup config show` and `--mode mockup config init` which returned the default values rather than the actual ones.
+
+- Replaced command `check that <bytes> was signed by <pkh>` by `check that bytes
+  <bytes> were signed by <pkh>` to differentiate from new command `check that
+  message <string> was signed by <pkh>`
+
 ## Baker / Endorser / Accuser
 
 - Add `--version` flag
@@ -55,7 +68,28 @@ here either.
 
 ## Miscellaneous
 
-- Make sure file decriptors are opened with the `O_CLOEXEC` flag.
+- Make sure file descriptors are opened with the `O_CLOEXEC` flag.
+
+# Version 8.2
+
+## Node
+
+- Override `PtEdoTez` activation by `PtEdo2Zk` in mainnet network.
+
+- Make size limits on p2p messages explicit in low-level encodings.
+
+- Add new RPCs for Edo: `helpers/scripts/normalize_{data,script,type}`
+  and a `XXX/normalized` variant to each protocol RPC `XXX`
+  outputting Michelson expressions.
+
+## Baker / Endorser / Accuser
+
+- Replace PtEdoTez by PtEdo2Zk.
+
+## Miscellaneous
+
+- Update external opam dependencies. In particular, switch to
+  `hacl-star.0.3.0-1` which performs better.
 
 # Version 8.1
 

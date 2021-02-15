@@ -45,6 +45,8 @@ module Equality_witness : sig
   val make : unit -> 'a t
 
   val eq : 'a t -> 'b t -> ('a, 'b) eq option
+
+  val hash : 'a t -> int
 end = struct
   type (_, _) eq = Refl : ('a, 'a) eq
 
@@ -69,6 +71,8 @@ end = struct
 
   let eq : type a b. a t -> b t -> (a, b) eq option =
    fun (module A) (module B) -> match A.Eq with B.Eq -> Some Refl | _ -> None
+
+  let hash : type a. a t -> int = fun (module A) -> Hashtbl.hash A.Eq
 end
 
 module Context = struct
@@ -161,6 +165,15 @@ module Context = struct
     let hash (Tree {ops = (module Ops); tree; _}) = Ops.Tree.hash tree
 
     let kind (Tree {ops = (module Ops); tree; _}) = Ops.Tree.kind tree
+
+    let to_value (Tree {ops = (module Ops); tree; _}) = Ops.Tree.to_value tree
+
+    let of_value
+        (Context
+          {ops = (module Ops) as ops; ctxt; equality_witness; impl_name; _}) v
+        =
+      Ops.Tree.of_value ctxt v
+      >|= fun tree -> Tree {ops; tree; equality_witness; impl_name}
 
     let equal (Tree {ops = (module Ops); tree; equality_witness; _}) (Tree t) =
       match equiv equality_witness t.equality_witness with

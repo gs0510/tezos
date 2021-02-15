@@ -28,6 +28,8 @@
 module Kind : sig
   type seed_nonce_revelation = Seed_nonce_revelation_kind
 
+  type endorsement_with_slot = Endorsement_with_slot_kind
+
   type double_endorsement_evidence = Double_endorsement_evidence_kind
 
   type double_baking_evidence = Double_baking_evidence_kind
@@ -47,6 +49,8 @@ module Kind : sig
   type origination = Origination_kind
 
   type delegation = Delegation_kind
+
+  type failing_noop = Failing_noop_kind
 
   type 'a manager =
     | Reveal_manager_kind : reveal manager
@@ -82,9 +86,15 @@ and _ contents =
       nonce : Seed_repr.nonce;
     }
       -> Kind.seed_nonce_revelation contents
+  | Endorsement_with_slot : {
+      endorsement : Kind.endorsement operation;
+      slot : int;
+    }
+      -> Kind.endorsement_with_slot contents
   | Double_endorsement_evidence : {
       op1 : Kind.endorsement operation;
       op2 : Kind.endorsement operation;
+      slot : int;
     }
       -> Kind.double_endorsement_evidence contents
   | Double_baking_evidence : {
@@ -110,6 +120,7 @@ and _ contents =
       ballot : Vote_repr.ballot;
     }
       -> Kind.ballot contents
+  | Failing_noop : string -> Kind.failing_noop contents
   | Manager_operation : {
       source : Signature.Public_key_hash.t;
       fee : Tez_repr.tez;
@@ -225,6 +236,8 @@ module Encoding : sig
 
   val seed_nonce_revelation_case : Kind.seed_nonce_revelation case
 
+  val endorsement_with_slot_case : Kind.endorsement_with_slot case
+
   val double_endorsement_evidence_case : Kind.double_endorsement_evidence case
 
   val double_baking_evidence_case : Kind.double_baking_evidence case
@@ -234,6 +247,8 @@ module Encoding : sig
   val proposals_case : Kind.proposals case
 
   val ballot_case : Kind.ballot case
+
+  val failing_noop_case : Kind.failing_noop case
 
   val reveal_case : Kind.reveal Kind.manager case
 

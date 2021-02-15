@@ -45,6 +45,10 @@ module M = struct
 
     let kind _ = assert false
 
+    let to_value _ = assert false
+
+    let of_value _ _ = assert false
+
     let find _ _ = assert false
 
     let add _ _ _ = assert false

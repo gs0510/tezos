@@ -72,8 +72,8 @@ let max_operation_data_length =
 let validation_passes =
   let open Alpha_context.Constants in
   Updater.
-    [ (* 32 endorsements *)
-      {max_size = 32 * 1024; max_op = Some 32};
+    [ (* 2048 endorsements *)
+      {max_size = 2048 * 2048; max_op = Some 2048};
       (* 32k of voting operations *)
       {max_size = 32 * 1024; max_op = None};
       (* revelations, wallet activations and denunciations *)
@@ -330,6 +330,12 @@ let compare_operations op1 op2 =
       1
   | (Single (Double_endorsement_evidence _), _) ->
       -1
+  | (Single (Endorsement_with_slot _), Single (Endorsement_with_slot _)) ->
+      0
+  | (_, Single (Endorsement_with_slot _)) ->
+      1
+  | (Single (Endorsement_with_slot _), _) ->
+      -1
   | (Single (Double_baking_evidence _), Single (Double_baking_evidence _)) ->
       0
   | (_, Single (Double_baking_evidence _)) ->
@@ -353,6 +359,12 @@ let compare_operations op1 op2 =
   | (_, Single (Ballot _)) ->
       1
   | (Single (Ballot _), _) ->
+      -1
+  | (Single (Failing_noop _), Single (Failing_noop _)) ->
+      0
+  | (_, Single (Failing_noop _)) ->
+      1
+  | (Single (Failing_noop _), _) ->
       -1
   (* Manager operations with smaller counter are pre-validated first. *)
   | (Single (Manager_operation op1), Single (Manager_operation op2)) ->
