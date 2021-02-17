@@ -180,9 +180,8 @@ let counter = ref 0
 let total = ref 0
 
 let commit_stats () =
-  let num_objects = Irmin_layers.Stats.get_adds () in
+  let num_objects = Irmin_layers.Stats.get_add_count () in
   total := !total + num_objects ;
-  Irmin_layers.Stats.reset_adds () ;
   (*Format.printf
     "Irmin stats: Objects created by commit %a = %d \n@."
     Store.Commit.pp_hash
@@ -208,45 +207,7 @@ let maxrss_stat h =
     objs
 
 let pp_stats () =
-  let stats = Irmin_layers.Stats.get () in
-  let pp_comma ppf () = Fmt.pf ppf "," in
-  let copied_objects =
-    let ls' =
-    match
-      List.map2
-        ~when_different_lengths:()
-        (fun x y -> x + y)
-        stats.copied_contents
-        stats.copied_commits
-    with
-    | Error () -> stats.copied_contents
-    | Ok ls -> ls in
-      match
-        List.map2
-          ~when_different_lengths:()
-          (fun x y -> x + y)
-          ls'
-          stats.copied_nodes
-      with
-      | Error () -> stats.copied_nodes
-      | Ok ls'' -> ls''
-  in
-  Format.printf
-    "%a Irmin stats: nb_freeze = %d copied_objects = %a waiting_freeze  = %a \
-     completed_freeze = %a \n\
-    \  objects added in upper since last freeze = %d \n\
-     @."
-    Time.System.pp_hum
-    (Systime_os.now ())
-    stats.nb_freeze
-    Fmt.(list ~sep:pp_comma int)
-    copied_objects
-    Fmt.(list ~sep:pp_comma float)
-    stats.waiting_freeze
-    Fmt.(list ~sep:pp_comma float)
-    stats.completed_freeze
-    !total ;
-  total := 0
+  Fmt.pr "\n%a%!" Irmin_layers.Stats.pp_latest ()
 
 let raw_commit ~time ?(message = "") context =
   counter := succ !counter ;
@@ -267,7 +228,7 @@ let raw_commit ~time ?(message = "") context =
            | Some x -> Lwt.return [x])
       | Error (`Msg msg) -> Lwt.fail_with (Format.sprintf "error reading hash %s" msg))
       >>= fun min_upper ->
-      pp_stats () ;
+	  pp_stats ();
       Store.freeze ~min_upper ~max:[h] context.index.repo )
    else
      Lwt.return_unit)
